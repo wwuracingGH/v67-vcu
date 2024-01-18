@@ -6,17 +6,37 @@
 #define STM32F042x6
 #include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
 
+//will disable this if there's ever a problem with the dma it hasn't earned my trust yet
+#define ADC_TO_DMA
+
 /**
  * POT_RESOLUTION = 4096 for 5V
  * APPS_MIN_VALUE = 0.5V
  * APPS_MAX_VALUE = 4.5V
  */
-#define POT_RESOLUTION (1 << 12)
-#define APPS_MIN_VALUE (POT_RESOLUTION / 10)
-#define APPS_MAX_VALUE (POT_RESOLUTION - APPS_MIN_VALUE)
+#define POT_RESOLUTION      4096
+#define APPS1_MIN_FRAC      0.6
+#define APPS1_MAX_FRAC      0.8
+#define APPS2_MIN_FRAC      0.4
+#define APPS2_MAX_FRAC      0.6
 
-//will disable this if there's ever a problem with the dma it hasn't earned my trust
-#define ADC_TO_DMA
+#define MIN_TORQUE_REQ      0 //do not change this. car not legally allowed to go backwards.
+#define MAX_TORQUE_REQ      5
+
+#define BRAKES_THREASHOLD   500 //change this in the future
+
+#define REMAP0_1(n, min, max) ((float)(n - min) / (float)(max - min))
+#define REMAPm_M(n, min, max) (n) * (max - min) + min
+
+const uint32_t APPS1_MIN    = 0;
+const uint32_t APPS1_MAX    = 0;  
+const uint32_t APPS2_MIN    = 0;
+const uint32_t APPS2_MAX    = 0;
+
+const uint32_t FBPS_MIN     = 0;
+const uint32_t FBPS_MAX     = 0;  
+const uint32_t RBPS_MIN     = 0;
+const uint32_t RBPS_MAX     = 0;
 
 struct {
     volatile uint32_t APPS2;
@@ -26,7 +46,8 @@ struct {
 } ADC_Vars;
 
 struct {
-    volatile int ready_to_drive;
+    volatile uint16_t ready_to_drive;
+    volatile uint16_t torque_req;
 } car_state;
 
 enum Pin_Mode {
@@ -39,11 +60,10 @@ enum Pin_Mode {
 void clock_init();
 void ADC_DMA_Init();
 void GPIO_Init();
+void CAN_Init();
 
-int apps_fault();
-void make_torque_req();
-void poll_ADC();
 void default_handler();
+int APPS_calc();
 void kill_car();
 
 void main(){
@@ -53,12 +73,9 @@ void main(){
     
     GPIO_Init(); //must be called first
     ADC_DMA_Init(&ADC_Vars.APPS2, 4); //Bad practice 🤷‍♀️
+    CAN_Init();
     for(;;) {
-        if(apps_fault()) default_handler();
-
-        if(car_state.ready_to_drive){
-            request_torque();
-        }
+        if(APPS_calc(&car_state.torque_req)) {kill_car();}
     }
 }   
 
@@ -147,9 +164,27 @@ void GPIO_Init(){
 }
 
 //returns 1 if there's an issue
-int apps_fault(){
+int APPS_calc(uint16_t *torque){
+    uint16_t fault, t_req = 0;
 
-    return 1;
+    float apps1 = REMAP0_1(ADC_Vars.APPS1, APPS1_MIN, APPS1_MAX),
+          apps2 = REMAP0_1(ADC_Vars.APPS2, APPS2_MIN, APPS2_MAX),
+          c_app = (apps1 + apps2) * 0.5f;
+
+    if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
+        fault = 1;
+    else if (abs(apps1 - apps2) > 0.1f)
+        fault = 1;
+    else if (c_app > 0.25f && ADC_Vars.FBPS > BRAKES_THREASHOLD)
+        fault = 1;
+    else
+        t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
+
+    GPIOB->ODR &= ~fault << 7;
+    GPIOB->ODR |= fault << 7;
+
+    *torque = t_req;
+    return fault;
 }
 
 //call if error
@@ -163,6 +198,6 @@ void kill_car() {
     GPIOB->ODR |= GPIO_ODR_6;
 }
 
-void request_torque(){
+void CAN_Init (){
 
 }
