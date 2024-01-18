@@ -1,3 +1,5 @@
+//this is not my code
+//i will rewrite it at some point
 #include <stdint.h>
 
 #define SRAM_START (0x20000000U)
@@ -196,6 +198,7 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
 
 extern uint32_t _etext, _sdata, _edata, _sbss, _ebss, _sidata;
 void main(void);
+void kill_car();
 
 void reset_handler(void)
 {
@@ -223,5 +226,6 @@ void reset_handler(void)
 
 void default_handler(void)
 {
+    kill_car();
     while(1);
 }
