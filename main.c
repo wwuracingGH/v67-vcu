@@ -66,6 +66,8 @@ void default_handler();
 int APPS_calc();
 void kill_car();
 
+void send_CAN();
+
 void main(){
     //setup
     clock_init();
@@ -75,7 +77,9 @@ void main(){
     ADC_DMA_Init(&ADC_Vars.APPS2, 4); //Bad practice 🤷‍♀️
     CAN_Init();
     for(;;) {
-        if(APPS_calc(&car_state.torque_req)) {kill_car();}
+        APPS_calc(&car_state.torque_req);
+
+        
     }
 }   
 
@@ -187,17 +191,28 @@ int APPS_calc(uint16_t *torque){
     return fault;
 }
 
-//call if error
-void kill_car() {
-    if (car_state.ready_to_drive){
-        car_state.ready_to_drive = 0;
-        //TODO: violently rip motor out of ready to drive with a can message
-    }
-
-    //turn on led0
-    GPIOB->ODR |= GPIO_ODR_6;
+void CAN_Init (){
+    CAN->MCR |= CAN_MCR_INRQ;
+    while ((CAN->MSR & CAN_MSR_INAK) != CAN_MSR_INAK);
+    
+    CAN->MCR &=~ CAN_MCR_SLEEP;
+    CAN->BTR |= 2 << 20 | 3 << 16 | 5 << 0; //TODO: fix bit timing
+    CAN->MCR &=~ CAN_MCR_INRQ;
+    
+    while ((CAN->MSR & CAN_MSR_INAK) == CAN_MSR_INAK);
+    CAN->FMR |= CAN_FMR_FINIT;
+    CAN->FMR &=~ CAN_FMR_FINIT;
+    CAN->IER |= CAN_IER_FMPIE0;
 }
 
-void CAN_Init (){
-
+void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
+    if ((CAN->TSR & CAN_TSR_TME0) == CAN_TSR_TME0)
+    {
+        CAN->sTxMailBox[0].TDTR = length;
+        for(int i = 0; i < length && i < 4; i++)
+            CAN->sTxMailBox[0].TDLR = data[i]   << i * 8;
+        for(int i = 0; i < length - 4; i++)
+            CAN->sTxMailBox[0].TDHR = data[i+4] << i * 8;
+        CAN->sTxMailBox[0].TIR = (uint32_t)(id << 21 | CAN_TI0R_TXRQ);
+    }
 }
