@@ -6,9 +6,6 @@
 #define STM32F042x6
 #include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
 
-//will disable this if there's ever a problem with the dma it hasn't earned my trust yet
-#define ADC_TO_DMA
-
 /**
  * POT_RESOLUTION = 4096 for 5V
  * APPS_MIN_VALUE = 0.5V
@@ -50,6 +47,12 @@ struct {
     volatile uint16_t torque_req;
 } car_state;
 
+typedef struct {
+    volatile uint32_t len;
+    volatile uint32_t id;
+    volatile uint64_t data;
+} CAN_msg;
+
 enum Pin_Mode {
     MODE_INPUT   = 0b00,
     MODE_OUTPUT  = 0b01,
@@ -64,7 +67,6 @@ void CAN_Init();
 
 void default_handler();
 int APPS_calc();
-void kill_car();
 
 void send_CAN();
 
@@ -76,10 +78,20 @@ void main(){
     GPIO_Init(); //must be called first
     ADC_DMA_Init(&ADC_Vars.APPS2, 4); //Bad practice 🤷‍♀️
     CAN_Init();
+
+    __enable_irq(); //enable interrupts
+
     for(;;) {
         APPS_calc(&car_state.torque_req);
 
-        
+        while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
+            uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
+            uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + CAN->sFIFOMailBox[0].RDHR << 32;
+            uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID;
+            CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
+
+            //do things here
+        }
     }
 }   
 
@@ -89,8 +101,10 @@ void clock_init() //see clocks.png
     FLASH->ACR |= FLASH_ACR_LATENCY;
 
     // Enables HSE oscillator
-    RCC->CR |= RCC_CR_HSEON;
+    RCC->CR  |= RCC_CR_CSSON | RCC_CR_HSEBYP | RCC_CR_HSEON;
     while (!(RCC->CR & RCC_CR_HSERDY));
+    RCC->CIR |= RCC_CIR_HSERDYC;
+    RCC->CFGR = ((RCC->CFGR & (~RCC_CFGR_SW)) | RCC_CFGR_SW_0);
 
     //don't technically need either of these, but sets prediv for both (useful when transfering to different stm)
     RCC->CFGR |= RCC_CFGR_PPRE_DIV1 | RCC_CFGR_PLLXTPRE_HSE_PREDIV_DIV1;
@@ -125,8 +139,6 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     ADC1->ISR = 0; //clear isr register
 	while(!(ADC1->ISR & 0x1)); //wait for enabled
 
-#ifdef ADC_TO_DMA
-
     RCC->AHBENR |= RCC_AHBENR_DMAEN;
 
     DMA1_Channel1->CCR &= ~DMA_CCR_MEM2MEM; //peripheral to memory
@@ -140,9 +152,6 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     DMA1_Channel1->CCR |= DMA_CCR_EN; //enables dma
 
 	ADC1->CR |= ADC_CR_ADSTART; //starts adc
-#else
-
-#endif
 }
 
 void GPIO_Init(){
@@ -213,6 +222,6 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
             CAN->sTxMailBox[0].TDLR = data[i]   << i * 8;
         for(int i = 0; i < length - 4; i++)
             CAN->sTxMailBox[0].TDHR = data[i+4] << i * 8;
-        CAN->sTxMailBox[0].TIR = (uint32_t)(id << 21 | CAN_TI0R_TXRQ);
+        CAN->sTxMailBox[0].TIR = (uint32_t)(id << CAN_TI0R_STID | CAN_TI0R_TXRQ);
     }
 }
