@@ -5,6 +5,8 @@
 #include <stdint.h>
 #define STM32F042x6
 #include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
+#include "canDefinitions.h"
+#include "vendor/qfplib/qfplib.h"
 
 /**
  * POT_RESOLUTION = 4096 for 5V
@@ -22,34 +24,39 @@
 
 #define BRAKES_THREASHOLD   500 //change this in the future
 
-#define REMAP0_1(n, min, max) ((float)(n - min) / (float)(max - min))
-#define REMAPm_M(n, min, max) (n) * (max - min) + min
+#define CONSTINV(n)             (1.0f / (float)(n)) //hopefully is forced to compile to a constant float with const variables
+#define REMAP0_1(n, min, max)   ((float)(n - min) / CONSTINV(max - min))
+#define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
+#define FABS(x)                 ((x) > 0.0f ? -(x) : (x))
 
-const uint32_t APPS1_MIN    = 0;
-const uint32_t APPS1_MAX    = 0;  
+const uint32_t APPS1_MIN    = 5;
+const uint32_t APPS1_MAX    = 0;
 const uint32_t APPS2_MIN    = 0;
 const uint32_t APPS2_MAX    = 0;
-
 const uint32_t FBPS_MIN     = 0;
-const uint32_t FBPS_MAX     = 0;  
+const uint32_t FBPS_MAX     = 0;
 const uint32_t RBPS_MIN     = 0;
 const uint32_t RBPS_MAX     = 0;
 
 struct {
-    volatile uint32_t APPS2;
-    volatile uint32_t RBPS;
-    volatile uint32_t FBPS;
-    volatile uint32_t APPS1;
+    volatile uint16_t APPS2;
+    volatile uint16_t RBPS;
+    volatile uint16_t FBPS;
+    volatile uint16_t APPS1;
 } ADC_Vars;
 
 struct {
     volatile uint16_t ready_to_drive;
     volatile uint16_t torque_req;
+    union {
+        struct MC_HighSpeed hs;
+        uint64_t bits;
+    } hsmessage;
 } car_state;
 
-typedef struct {
-    volatile uint32_t len;
+typedef struct _canmsg{
     volatile uint32_t id;
+    volatile uint32_t len;
     volatile uint64_t data;
 } CAN_msg;
 
@@ -66,11 +73,12 @@ void GPIO_Init();
 void CAN_Init();
 
 void default_handler();
+
 int APPS_calc();
+void send_CAN(uint16_t, uint8_t, uint8_t*);
+void process_can(CAN_msg);
 
-void send_CAN();
-
-void main(){
+int main(){
     //setup
     clock_init();
     SystemCoreClockUpdate();
@@ -81,16 +89,26 @@ void main(){
 
     __enable_irq(); //enable interrupts
 
+    uint32_t canTimer = 500000;
+
     for(;;) {
         APPS_calc(&car_state.torque_req);
 
         while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
             uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
-            uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + CAN->sFIFOMailBox[0].RDHR << 32;
-            uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID;
+            uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
+            uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
             CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
 
-            //do things here
+            CAN_msg canrx = {can_id, can_len, can_data};
+            process_can(canrx);
+        }
+
+        if(canTimer--);
+        else {
+            canTimer = 500000;
+            send_CAN(0b0001, 8, (uint8_t*)&ADC_Vars.APPS2);
+            
         }
     }
 }   
@@ -128,30 +146,37 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     ADC1->CFGR1 |= ADC_CFGR1_CONT; //analog to digital converter to cont mode
     ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; //align bits to the right
 
-    ADC1->CFGR1 |= ADC_CFGR1_DMAEN & ADC_CFGR1_DMACFG; //enable dma & make cont
+    ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; //enable dma & make cont
 
     ADC1->SMPR |= 0b011; //28.5 adc clock cycles
 
     ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; //channels to scan
 
-    ADC1->CR |= ADC_CR_ADEN; //enable
-	
-    ADC1->ISR = 0; //clear isr register
-	while(!(ADC1->ISR & 0x1)); //wait for enabled
+    RCC->CR2 |= RCC_CR2_HSI14ON;
+    while ((RCC->CR2 & RCC_CR2_HSI14RDY) == 0);
+    ADC1->CFGR2 &= (~ADC_CFGR2_CKMODE);
+
+    if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
+        ADC1->ISR |= ADC_ISR_ADRDY;
+    ADC1->CR |= ADC_CR_ADEN;
+    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0);
 
     RCC->AHBENR |= RCC_AHBENR_DMAEN;
 
     DMA1_Channel1->CCR &= ~DMA_CCR_MEM2MEM; //peripheral to memory
-    DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC; //c
+    DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC | DMA_CCR_TEIE; //c
     DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0 | DMA_CCR_PSIZE_0; //set size of data to transfer
     
-    DMA1_Channel1->CPAR = ADC1->DR; //sets source of dma transfer
-    DMA1_Channel1->CMAR = dest; //sets destination of dma transfer
+    DMA1_Channel1->CPAR = (uint32_t) (&(ADC1->DR)); //sets source of dma transfer
+    DMA1_Channel1->CMAR = (uint32_t)dest; //sets destination of dma transfer
     DMA1_Channel1->CNDTR = size; //sets size of dma transfer
     
     DMA1_Channel1->CCR |= DMA_CCR_EN; //enables dma
 
 	ADC1->CR |= ADC_CR_ADSTART; //starts adc
+
+    NVIC_EnableIRQ(DMA1_Channel1_IRQn); /* (1) */
+    NVIC_SetPriority(DMA1_Channel1_IRQn,0); /* (2) */
 }
 
 void GPIO_Init(){
@@ -186,7 +211,7 @@ int APPS_calc(uint16_t *torque){
 
     if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
         fault = 1;
-    else if (abs(apps1 - apps2) > 0.1f)
+    else if (FABS(apps1 - apps2) > 0.1f)
         fault = 1;
     else if (c_app > 0.25f && ADC_Vars.FBPS > BRAKES_THREASHOLD)
         fault = 1;
@@ -205,7 +230,8 @@ void CAN_Init (){
     while ((CAN->MSR & CAN_MSR_INAK) != CAN_MSR_INAK);
     
     CAN->MCR &=~ CAN_MCR_SLEEP;
-    CAN->BTR |= 2 << 20 | 3 << 16 | 5 << 0; //TODO: fix bit timing
+    //for 500khz
+    CAN->BTR |= 47 << CAN_BTR_BRP_Pos | 3 << CAN_BTR_TS1_Pos | 2 << CAN_BTR_TS2_Pos | 1 << CAN_BTR_SJW_Pos;
     CAN->MCR &=~ CAN_MCR_INRQ;
     
     while ((CAN->MSR & CAN_MSR_INAK) == CAN_MSR_INAK);
@@ -222,6 +248,14 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
             CAN->sTxMailBox[0].TDLR = data[i]   << i * 8;
         for(int i = 0; i < length - 4; i++)
             CAN->sTxMailBox[0].TDHR = data[i+4] << i * 8;
-        CAN->sTxMailBox[0].TIR = (uint32_t)(id << CAN_TI0R_STID | CAN_TI0R_TXRQ);
+        CAN->sTxMailBox[0].TIR = (uint32_t)((id << CAN_TI0R_STID_Pos) | CAN_TI0R_TXRQ);
+    }
+}
+
+void process_can(CAN_msg cm){
+    switch (cm.id){
+        case MC_CANID_HIGHSPEEDMESSAGE:
+            car_state.hsmessage.bits = cm.data;
+        break;
     }
 }

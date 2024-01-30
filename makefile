@@ -1,13 +1,12 @@
 CC=arm-none-eabi-gcc
 CFLAGS=-mcpu=cortex-m0 -mthumb -nostdlib
-CPPFLAGS=-DSTM32F042x6 \
-	 -Ivendor/CMSIS/Device/ST/STM32F0/Include \
+CPPFLAGS= -Ivendor/CMSIS/Device/ST/STM32F0/Include \
 	 -Ivendor/CMSIS/CMSIS/Core/Include
 	
 LINKER_FILE=linker_script.ld
 LDFLAGS=-T $(LINKER_FILE)
 
-BINARY = blink.elf
+BINARY = a.elf
 
 PROGRAMMER = openocd
 PROGRAMMER_FLAGS = -f interface/stlink.cfg -f target/stm32f0x.cfg
