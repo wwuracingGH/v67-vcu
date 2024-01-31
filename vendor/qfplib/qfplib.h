@@ -47,11 +47,11 @@ extern          float qfp_fexp(float x);
 extern          float qfp_fln(float x);
 extern          float qfp_fsqrt(float x); 
 extern          float qfp_fsqrt_fast(float x);  
-inline          float qfp_fcmpeq(float x, float y){ return qfp_fcmp(x,y) == 0; }
-inline          float qfp_fcmplt(float x, float y){ return qfp_fcmp(x,y) <  0; }
-inline          float qfp_fcmple(float x, float y){ return qfp_fcmp(x,y) <= 0; }
-inline          float qfp_fcmpgt(float x, float y){ return qfp_fcmp(x,y) >  0; }
-inline          float qfp_fcmpge(float x, float y){ return qfp_fcmp(x,y) >= 0; }
+extern inline   float qfp_fcmpeq(float x, float y){ return qfp_fcmp(x,y) == 0; }
+extern inline   float qfp_fcmplt(float x, float y){ return qfp_fcmp(x,y) <  0; }
+extern inline   float qfp_fcmple(float x, float y){ return qfp_fcmp(x,y) <= 0; }
+extern inline   float qfp_fcmpgt(float x, float y){ return qfp_fcmp(x,y) >  0; }
+extern inline   float qfp_fcmpge(float x, float y){ return qfp_fcmp(x,y) >= 0; }
 
 #ifdef __cplusplus
   } // extern "C"
