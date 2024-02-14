@@ -82,7 +82,9 @@ int APPS_calc();
 void send_CAN(uint16_t, uint8_t, uint8_t*);
 void process_can(CAN_msg);
 
-/*
+/* 
+
+TODO: what is thumb 2 and why does it hate me :/
 uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     uint32_t q = 0, k = 0;
     asm(
@@ -107,16 +109,15 @@ uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     return q;
 }
 */
+
+uint32_t clz(uint32_t i){
+    uint32_t j = 0, n = i;
+    while((n = n >> 1)) j++;
+    return j;
+}
+
 uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
-    uint32_t q = 0, k = 0;
-    asm(
-        "clz r4, %[n] \n\t"
-        "clz r5, %[d] \n\t"
-        "sub %[ret], r4, r5 \n\t"
-        : [ret]"=r" (k)
-        : [n]"r" (u), [d]"r" (v)
-        : "r4", "r5"
-    );
+    uint32_t q = 0, k = clz(u) - clz(v);
     v << k;
     k = 1 << k;
     do {
@@ -134,6 +135,8 @@ int main(){
     SystemCoreClockUpdate();
     
     GPIO_Init(); //must be called first
+
+    GPIOB->ODR |= 1 << 7;
     ADC_DMA_Init(&ADC_Vars.APPS2, 4); //Bad practice 🤷‍♀️
     CAN_Init();
 
@@ -144,15 +147,6 @@ int main(){
     for(;;) {
         APPS_calc(&car_state.torque_req);
 
-        while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
-            uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
-            uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
-            uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
-            CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
-
-            CAN_msg canrx = {can_id, can_len, can_data};
-            process_can(canrx);
-        }
 
         if(!(canTimer--)){
             canTimer = 500000;
@@ -227,26 +221,49 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     NVIC_SetPriority(DMA1_Channel1_IRQn,0); /* (2) */
 }
 
+void CAN_Init (){
+    RCC->APB1ENR |= RCC_APB1ENR_CANEN;
+    CAN->MCR |= CAN_MCR_INRQ;
+
+    while (!(CAN->MSR & CAN_MSR_INAK));
+    
+    CAN->MCR &= ~CAN_MCR_SLEEP;
+    while (CAN->MSR & CAN_MSR_SLAK);
+
+    CAN->BTR |= 3 << CAN_BTR_BRP_Pos | 1 << CAN_BTR_TS1_Pos | 0 << CAN_BTR_TS2_Pos;
+    CAN->MCR &= ~CAN_MCR_INRQ;
+    
+    while (CAN->MSR & CAN_MSR_INAK);
+
+    CAN->FMR |= CAN_FMR_FINIT;
+    CAN->FA1R |= CAN_FA1R_FACT0;
+    CAN->sFilterRegister[0].FR1 = 0; // Its like a filter, but doesn't filter anything!
+    CAN->sFilterRegister[0].FR2 = 0;
+    CAN->FMR &=~ CAN_FMR_FINIT;
+    CAN->IER |= CAN_IER_FMPIE0;
+}
+
 void GPIO_Init(){
     //turn on gpio clocks
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
 
-    //todo: figure out how to put this into a bitfield struct so it's not at the bottom of the code and sets the register once
-    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos); // set porta 0 as digital input
-    GPIOA->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER1_Pos); // set porta 1 as analog input
-    GPIOA->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER5_Pos); // set porta 5 as analog input
-    GPIOA->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER6_Pos); // set porta 6 as analog input
-    GPIOA->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos); // set porta 9 as digital output
-    GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos); // set portb 0 as analog input
-    GPIOB->MODER |= (MODE_INPUT     << GPIO_MODER_MODER1_Pos); // set portb 1 as digital input
-    GPIOB->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER3_Pos); // TODO: im sorry what exactly is the bspd light
-    GPIOB->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos); // set portb 5 as digital output
-    GPIOB->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos); // set portb 6 as digital output
-    GPIOB->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER7_Pos); // set portb 7 as digital output
-    //the alternate, evil version:
-    //GPIOA->MODER = 0b00000000000001000011110000001100;
-    //GPIOB->MODER = 0b00000000000000000101010001000011;
+    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   // set porta 0 as digital input
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER1_Pos)   // set porta 1 as analog input
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER5_Pos)   // set porta 5 as analog input
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER6_Pos)   // set porta 6 as analog input
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos)   // set porta 9 as digital output
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER11_Pos)  //can TX
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER12_Pos); //can RX
+
+    GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR11 | GPIO_PUPDR_PUPDR12); // no pull up - pull down on can
+    GPIOA->AFR[1] = (4 << GPIO_AFRH_AFSEL11_Pos) | (4 << GPIO_AFRH_AFSEL12_Pos); //set up can
+
+    GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   // set portb 0 as analog input
+                 |  (MODE_INPUT     << GPIO_MODER_MODER1_Pos)   // set portb 1 as digital input
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos)   // set portb 5 as digital output
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   // set portb 6 as digital output
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER7_Pos);  // set portb 7 as digital output
 }
 
 //returns 1 if there's an issue
@@ -271,21 +288,6 @@ int APPS_calc(uint16_t *torque){
 
     *torque = t_req;
     return fault;
-}
-
-void CAN_Init (){
-    CAN->MCR |= CAN_MCR_INRQ;
-    while ((CAN->MSR & CAN_MSR_INAK) != CAN_MSR_INAK);
-    
-    CAN->MCR &=~ CAN_MCR_SLEEP;
-    //for 500khz
-    CAN->BTR |= 47 << CAN_BTR_BRP_Pos | 3 << CAN_BTR_TS1_Pos | 2 << CAN_BTR_TS2_Pos | 1 << CAN_BTR_SJW_Pos;
-    CAN->MCR &=~ CAN_MCR_INRQ;
-    
-    while ((CAN->MSR & CAN_MSR_INAK) == CAN_MSR_INAK);
-    CAN->FMR |= CAN_FMR_FINIT;
-    CAN->FMR &=~ CAN_FMR_FINIT;
-    CAN->IER |= CAN_IER_FMPIE0;
 }
 
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){

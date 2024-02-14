@@ -6,7 +6,7 @@
  * https://app.box.com/s/vf9259qlaadhzxqiqrt5cco8xpsn84hk/file/27334613044
  */ 
 
-#define CANSTRUCT struct __attribute__((packed, scalar_storage_order("little-endian")))
+#define CANSTRUCT struct __attribute__((packed, scalar_storage_order("big-endian")))
 
 typedef int16_t     MC_Temperature;
 typedef int16_t     MC_LowVoltage;
