@@ -27,20 +27,20 @@
 #define BRAKES_THREASHOLD   500 //change this in the future
 
 #define CONSTINV(n)             (1.0f / (float)(n)) //hopefully is forced to compile to a constant float with const variables
-#define REMAP0_1(n, min, max)   ((float)(n - min) / CONSTINV(max - min))
+#define REMAP0_1(n, min, max)   ((float)(n - min) * CONSTINV(max - min))
 #define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
-#define FABS(x)                 ((x) > 0.0f ? -(x) : (x))
+#define FABS(x)                 ((x) > 0.0f ? (x) : -(x))
 
-const uint32_t APPS1_MIN    = 5;
-const uint32_t APPS1_MAX    = 0;
-const uint32_t APPS2_MIN    = 0;
-const uint32_t APPS2_MAX    = 0;
+const uint32_t APPS1_MIN    = 1000;
+const uint32_t APPS1_MAX    = 3300;
+const uint32_t APPS2_MIN    = 1000;
+const uint32_t APPS2_MAX    = 3300;
 const uint32_t FBPS_MIN     = 0;
-const uint32_t FBPS_MAX     = 0;
+const uint32_t FBPS_MAX     = 4092;
 const uint32_t RBPS_MIN     = 0;
-const uint32_t RBPS_MAX     = 0;
+const uint32_t RBPS_MAX     = 4092;
 
-struct {
+struct __attribute__((packed)){
     volatile uint16_t APPS2;
     volatile uint16_t RBPS;
     volatile uint16_t FBPS;
@@ -51,7 +51,7 @@ struct {
     volatile uint16_t ready_to_drive;
     volatile uint16_t torque_req;
     union {
-        struct MC_HighSpeed hs;
+        MC_HighSpeed hs;
         uint64_t bits;
     } hsmessage;
 } car_state;
@@ -69,8 +69,6 @@ enum Pin_Mode {
     MODE_ANALOG  = 0b11
 };
 
-
-
 void clock_init();
 void ADC_DMA_Init();
 void GPIO_Init();
@@ -80,35 +78,8 @@ void default_handler();
 
 int APPS_calc();
 void send_CAN(uint16_t, uint8_t, uint8_t*);
-void process_can(CAN_msg);
-
-/* 
-
-TODO: what is thumb 2 and why does it hate me :/
-uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
-    uint32_t q = 0, k = 0;
-    asm(
-        "clz r4, %[n]                   \n\t"
-        "clz r5, %[d]                   \n\t"
-        "sub %[cnt], r4, r5             \n\t"
-        "lsl %[d], %[d], %[cnt]         \n\t"
-        "mov %[ret], #0                 \n\t"
-        "lsl %[cnt], #1, %[cnt]         \n"
-    ".loop                              \n\t"
-        "cmp %[n], %[d]                 \n\t"
-        "subls %[n], %[n], %[d]         \n\t"
-        "addls %[ret], %[cnt], %[ret]   \n\t"
-        "lsr %[d], %[d], #1             \n\t"
-        "lsrs %[cnt], %[cnt], #1        \n\t"
-        "beq loop"
-    :   [ret]"=r" (q)
-    :   [cnt]"+r" (k), [n]"+r" (u), [d]"+r" (v)
-    :   "cc"
-    );
-
-    return q;
-}
-*/
+void process_CAN(CAN_msg);
+void recieve_CAN();
 
 uint32_t clz(uint32_t i){
     uint32_t j = 0, n = i;
@@ -129,10 +100,11 @@ uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     return q;
 }
 
+int32_t canTimer = 0, canTimerReset = 50000;
+
 int main(){
     //setup
-    clock_init();
-    SystemCoreClockUpdate();
+    //clock_init();
     
     GPIO_Init(); //must be called first
 
@@ -142,18 +114,27 @@ int main(){
 
     __enable_irq(); //enable interrupts
 
-    uint32_t canTimer = 500000;
+    MC_Command canmsg = {100, 0, 1, 1, 0, 0, 0, 0};
+
+    uint16_t h[4];// = {0, 0, 0, 0};
 
     for(;;) {
-        APPS_calc(&car_state.torque_req);
+        if(canTimer <= 0){
+            APPS_calc(&car_state.torque_req);
 
-
-        if(!(canTimer--)){
-            canTimer = 500000;
-            send_CAN(0b0001, 8, (uint8_t*)&ADC_Vars.APPS2);
+            h[0] = ADC_Vars.APPS2;
+            h[1] = 0;
+            h[2] = 0;
+            h[3] = ADC_Vars.APPS1;
+            send_CAN(0b001, 8, (uint8_t*)&h[0]);
+            send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
+            
+            //GPIOB->ODR ^= GPIO_ODR_7;
+            canTimer = canTimerReset;
         }
+        canTimer--;
     }
-}   
+}
 
 void clock_init() //see clocks.png
 {
@@ -190,7 +171,7 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 
     ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; //enable dma & make cont
 
-    ADC1->SMPR |= 0b011; //28.5 adc clock cycles
+    ADC1->SMPR |= 0b111;
 
     ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; //channels to scan
 
@@ -256,7 +237,9 @@ void GPIO_Init(){
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODER11_Pos)  //can TX
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODER12_Pos); //can RX
 
-    GPIOA->PUPDR &= ~(GPIO_PUPDR_PUPDR11 | GPIO_PUPDR_PUPDR12); // no pull up - pull down on can
+    // no pull up - pull down
+    GPIOA->PUPDR  = 0;
+    GPIOB->PUPDR  = 0;
     GPIOA->AFR[1] = (4 << GPIO_AFRH_AFSEL11_Pos) | (4 << GPIO_AFRH_AFSEL12_Pos); //set up can
 
     GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   // set portb 0 as analog input
@@ -277,32 +260,49 @@ int APPS_calc(uint16_t *torque){
     if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
         fault = 1;
     else if (FABS(apps1 - apps2) > 0.1f)
-        fault = 1;
-    else if (c_app > 0.25f && ADC_Vars.FBPS > BRAKES_THREASHOLD)
-        fault = 1;
+        fault = 2;
+    else if (c_app > 0.25f && !(ADC_Vars.FBPS > BRAKES_THREASHOLD))
+        fault = 3;
     else
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
 
-    GPIOB->ODR &= ~fault << 7;
-    GPIOB->ODR |= fault << 7;
+    uint16_t h[4] = {(uint16_t)(apps1 * 65536), (uint16_t)(apps2 * 65536), (uint16_t)(c_app * 65536), fault};
+    send_CAN(0x002, 8, (uint8_t*)&h[0]);
+
+    GPIOB->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
+    GPIOB->ODR |= fault << 6;
 
     *torque = t_req;
     return fault;
 }
 
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
-    if ((CAN->TSR & CAN_TSR_TME0) == CAN_TSR_TME0)
-    {
-        CAN->sTxMailBox[0].TDTR = length;
-        for(int i = 0; i < length && i < 4; i++)
-            CAN->sTxMailBox[0].TDLR = data[i]   << i * 8;
-        for(int i = 0; i < length - 4; i++)
-            CAN->sTxMailBox[0].TDHR = data[i+4] << i * 8;
-        CAN->sTxMailBox[0].TIR = (uint32_t)((id << CAN_TI0R_STID_Pos) | CAN_TI0R_TXRQ);
+    //find first empty mailbox
+    int j = (CAN->TSR & CAN_TSR_CODE_Msk) >> CAN_TSR_CODE_Pos;
+
+    CAN->sTxMailBox[j].TDTR = length;
+    CAN->sTxMailBox[j].TDLR = 0;
+    CAN->sTxMailBox[j].TDHR = 0;
+    for(int i = 0; i < length && i < 4; i++)
+        CAN->sTxMailBox[j].TDLR |= ((data[i] & 0xFF) << i * 8);
+    for(int i = 0; i < length - 4; i++)
+        CAN->sTxMailBox[j].TDHR |= ((data[i+4] & 0xFF) << i * 8);
+    CAN->sTxMailBox[j].TIR = (uint32_t)((id << CAN_TI0R_STID_Pos) | CAN_TI0R_TXRQ);
+}
+
+void recieve_CAN(){
+    while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
+        uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
+        uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
+        uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
+        CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
+
+        CAN_msg canrx = {can_id, can_len, can_data};
+        process_CAN(canrx);
     }
 }
 
-void process_can(CAN_msg cm){
+void process_CAN(CAN_msg cm){
     switch (cm.id){
         case MC_CANID_HIGHSPEEDMESSAGE:
             car_state.hsmessage.bits = cm.data;

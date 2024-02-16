@@ -1,5 +1,5 @@
 CC=arm-none-eabi-gcc
-CFLAGS=-mcpu=cortex-m0 -mthumb -nostdlib
+CFLAGS=-mcpu=cortex-m0 -mthumb -nostdlib -W -Wall
 CPPFLAGS= -DSTM32F042x6 -Ivendor/CMSIS/Device/ST/STM32F0/Include \
 	 -Ivendor/CMSIS/CMSIS/Core/Include \
 	 -Ivendor/qfplib
@@ -7,7 +7,7 @@ CPPFLAGS= -DSTM32F042x6 -Ivendor/CMSIS/Device/ST/STM32F0/Include \
 LINKER_FILE=linker_script.ld
 LDFLAGS=-T $(LINKER_FILE)
 
-BINARY = a.elf
+BINARY = v66vcu.elf
 
 all: $(BINARY) clean
 

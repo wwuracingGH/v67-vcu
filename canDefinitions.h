@@ -6,7 +6,7 @@
  * https://app.box.com/s/vf9259qlaadhzxqiqrt5cco8xpsn84hk/file/27334613044
  */ 
 
-#define CANSTRUCT struct __attribute__((packed, scalar_storage_order("big-endian")))
+#define MC_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
 
 typedef int16_t     MC_Temperature;
 typedef int16_t     MC_LowVoltage;
@@ -136,35 +136,35 @@ const char* MC_Run_Errors[32] = {
     ""
 };
 
-CANSTRUCT MC_Temperature1 {
+MC_CANSTRUCT  {
     MC_Temperature      moduleATemp;
     MC_Temperature      moduleBTemp;
     MC_Temperature      moduleCTemp;
     MC_Temperature      gateDriverBoardTemp;
-};
+} MC_Temperature1;
 
-CANSTRUCT MC_Temperature2 {
+MC_CANSTRUCT  {
     MC_Temperature      controlBoardTemp;
     MC_Temperature      rtdInput1Temp;
     MC_Temperature      rtdInput2Temp;
     MC_Temperature      rtdInput3Temp;
-};
+} MC_Temperature2;
 
-CANSTRUCT MC_Temperature3 {
+MC_CANSTRUCT  {
     MC_Temperature      rtdInput4Temp;
     MC_Temperature      rtdInput5Temp;
     MC_Temperature      motorTemp;
     MC_Torque           torqueShudder;
-};
+} MC_Temperature3;
 
-CANSTRUCT MC_AnalogInVoltages {
+MC_CANSTRUCT {
     MC_LowVoltage       AnalogIn1;
     MC_LowVoltage       AnalogIn2;
     MC_LowVoltage       AnalogIn3;
     MC_LowVoltage       AnalogIn4;
-};
+} MC_AnalogInVoltages;
 
-CANSTRUCT MC_DigitalInput {
+MC_CANSTRUCT {
     MC_Boolean          digitalInput1;
     MC_Boolean          digitalInput2;
     MC_Boolean          digitalInput3;
@@ -173,44 +173,44 @@ CANSTRUCT MC_DigitalInput {
     MC_Boolean          digitalInput6;
     MC_Boolean          digitalInput7;
     MC_Boolean          digitalInput8;
-};
+} MC_DigitalInput;
 
-CANSTRUCT MC_MotorPosition {
+MC_CANSTRUCT {
     MC_Angle            motorAngle;
     MC_AngularVelocity  motorSpeed;
     MC_Frequency        electricalOutputFrequency;
     MC_Angle            deltaResolverFiltered;
-}; 
+} MC_MotorPosition; 
 
-CANSTRUCT MC_CurrentInfo {
+MC_CANSTRUCT {
     MC_Current          phaseACurrent;
     MC_Current          phaseBCurrent;
     MC_Current          phaseCCurrent;
     MC_Current          dcBusCurrent;
-};
+} MC_CurrentInfo;
 
-CANSTRUCT MC_VoltageInfo {
+MC_CANSTRUCT {
     MC_Current          dcBusVoltage;
     MC_Current          outputVoltage;
     MC_Current          VABVoltage;
     MC_Current          VBCVoltage;
-};   
+} MC_VoltageInfo;   
 
-CANSTRUCT MC_FluxInfo {
+MC_CANSTRUCT {
     MC_Flux             fluxCommand;
     MC_Flux             fluxFeedback;
     MC_Current          ldFeedback;
     MC_Current          lqFeedback;
-};
+} MC_FluxInfo;
 
-CANSTRUCT MC_InternalVoltages {
+MC_CANSTRUCT  {
     MC_LowVoltage       ref1Point5V;
     MC_LowVoltage       ref2Point5V;
     MC_LowVoltage       ref5V;
     MC_LowVoltage       ref12V;
-};
+} MC_InternalVoltages;
 
-CANSTRUCT MC_InternalStates {
+MC_CANSTRUCT {
     MC_Byte             vsmState;
     MC_Byte             _RESERVED1;
     MC_Byte             inverterState;
@@ -222,48 +222,51 @@ CANSTRUCT MC_InternalStates {
     MC_Boolean          inverterCommandMode         : 4;
     uint8_t             rollingCounterValue         : 4;
     MC_UnsignedInt      whateverElse;
-};
+} MC_InternalStates;
 
-CANSTRUCT MC_FaultCodes {
+MC_CANSTRUCT {
     uint32_t            postErrors;
     uint32_t            runtimeErrors;
-};
+} MC_FaultCodes;
 
-CANSTRUCT MC_TorqueTimer {
+MC_CANSTRUCT {
     MC_Torque           commandedTorque;
     MC_Torque           torqueFeedback;
     MC_Time32           powerOnTimer;
-};
+} MC_TorqueTimer;
 
-CANSTRUCT MC_MIandFluxWeakeningInfo {
+MC_CANSTRUCT {
     MC_UnsignedInt      modulationIndex;
     MC_Current          fluxWeakening;
     MC_Current          ldCommand;
     MC_Current          lqCommand;
-};
+} MC_MIandFluxWeakeningInfo;
 
-CANSTRUCT MC_FirmwareInfo {
+MC_CANSTRUCT {
     MC_UnsignedInt      version;
     MC_UnsignedInt      softwareVersion;
     MC_UnsignedInt      dateCodeMMDD;
     MC_UnsignedInt      dateCodeYYYY;
-}; 
+} MC_FirmwareInfo; 
 
-CANSTRUCT MC_Diagnostic {
+MC_CANSTRUCT {
     uint32_t a, b;
-}; 
+} MC_Diagnostic; 
 
-CANSTRUCT MC_HighSpeed {
+MC_CANSTRUCT {
     MC_Torque           torqueCommand;
     MC_Torque           torqueFeedback;
     MC_AngularVelocity  motorSpeed;
     MC_HighVoltage      dcBusVoltage;
-};
+} MC_HighSpeed;
 
-CANSTRUCT MC_Command {
+MC_CANSTRUCT {
     MC_Torque           torqueCommand;
     MC_AngularVelocity  speedCommand;
     MC_Boolean          directionCommand;
-    MC_Byte             controlByte;
+    MC_Byte             inverterEnable : 1;
+    MC_Byte             inverterDischarge : 1;
+    MC_Byte             speedEnableMode   : 1;
+    MC_Byte             _RESERVED : 5;
     MC_Torque           torqueLimit;
-};
+} MC_Command;
