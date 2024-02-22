@@ -72,7 +72,3 @@ PROVIDE(__aeabi_fcmpgt	= qfp_fcmpgt);
 /* float __attribute(alias("qfp_fsqrt")) */
 /* float __attribute(alias("qfp_fsqrt_fast")) */
 /* float __attribute(alias("qfp_fdiv_fast")) */
-/* float __attribute(alias("qfp_float2fix")) */
-/* float __attribute(alias("qfp_float2ufix")) */
-/* float __attribute(alias("qfp_fix2float")) */
-/* float __attribute(alias("qfp_ufix2float")) */

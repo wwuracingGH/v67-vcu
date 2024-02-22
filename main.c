@@ -21,6 +21,10 @@
 #define APPS2_MIN_FRAC      0.4
 #define APPS2_MAX_FRAC      0.6
 
+#define ROLLING_ADC_FR_POW 3
+#define ROLLING_ADC_FRAMES (2 << ROLLING_ADC_FR_POW) 
+#define ROLLING_ADC_VALS  (ROLLING_ADC_FRAMES * 4)
+
 #define MIN_TORQUE_REQ      0 //do not change this. car not legally allowed to go backwards.
 #define MAX_TORQUE_REQ      5
 
@@ -40,12 +44,14 @@ const uint32_t FBPS_MAX     = 4092;
 const uint32_t RBPS_MIN     = 0;
 const uint32_t RBPS_MAX     = 4092;
 
-struct __attribute__((packed)){
-    volatile uint16_t APPS2;
-    volatile uint16_t RBPS;
-    volatile uint16_t FBPS;
-    volatile uint16_t APPS1;
+struct __attribute__((packed)) {
+    volatile uint32_t APPS2;
+    volatile uint32_t RBPS;
+    volatile uint32_t FBPS;
+    volatile uint32_t APPS1;
 } ADC_Vars;
+
+uint16_t ADC_RollingValues[ROLLING_ADC_VALS];
 
 struct {
     volatile uint16_t ready_to_drive;
@@ -76,6 +82,7 @@ void CAN_Init();
 
 void default_handler();
 
+void APPS_RollingSmooth();
 int APPS_calc();
 void send_CAN(uint16_t, uint8_t, uint8_t*);
 void process_CAN(CAN_msg);
@@ -109,18 +116,21 @@ int main(){
     GPIO_Init(); //must be called first
 
     GPIOB->ODR |= 1 << 7;
-    ADC_DMA_Init(&ADC_Vars.APPS2, 4); //Bad practice 🤷‍♀️
+    ADC_DMA_Init(ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
 
     __enable_irq(); //enable interrupts
 
     MC_Command canmsg = {100, 0, 1, 1, 0, 0, 0, 0};
 
-    uint16_t h[4];// = {0, 0, 0, 0};
+    uint16_t h[4];
 
     for(;;) {
         if(canTimer <= 0){
+            APPS_RollingSmooth();
             APPS_calc(&car_state.torque_req);
+
+            canmsg.torqueCommand = car_state.torque_req;
 
             h[0] = ADC_Vars.APPS2;
             h[1] = 0;
@@ -142,10 +152,10 @@ void clock_init() //see clocks.png
     FLASH->ACR |= FLASH_ACR_LATENCY;
 
     // Enables HSE oscillator
-    RCC->CR  |= RCC_CR_CSSON | RCC_CR_HSEBYP | RCC_CR_HSEON;
+    RCC->CR  |= RCC_CR_CSSON | RCC_CR_HSEON;
     while (!(RCC->CR & RCC_CR_HSERDY));
     RCC->CIR |= RCC_CIR_HSERDYC;
-    RCC->CFGR = ((RCC->CFGR & (~RCC_CFGR_SW)) | RCC_CFGR_SW_0);
+    RCC->CFGR |= RCC_CFGR_SW_0;
 
     //don't technically need either of these, but sets prediv for both (useful when transfering to different stm)
     RCC->CFGR |= RCC_CFGR_PPRE_DIV1 | RCC_CFGR_PLLXTPRE_HSE_PREDIV_DIV1;
@@ -249,8 +259,27 @@ void GPIO_Init(){
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER7_Pos);  // set portb 7 as digital output
 }
 
+//very fast average
+void APPS_RollingSmooth(){
+    for(int i = 0; i < ROLLING_ADC_VALS; i += 4){
+        ADC_Vars.APPS2 += ADC_RollingValues[i + 0];
+        ADC_Vars.RBPS  += ADC_RollingValues[i + 1];
+        ADC_Vars.FBPS  += ADC_RollingValues[i + 2];
+        ADC_Vars.APPS1 += ADC_RollingValues[i + 3];
+    }
+
+    ADC_Vars.APPS2 >>= ROLLING_ADC_FR_POW;
+    ADC_Vars.RBPS  >>= ROLLING_ADC_FR_POW;
+    ADC_Vars.FBPS  >>= ROLLING_ADC_FR_POW;
+    ADC_Vars.APPS1 >>= ROLLING_ADC_FR_POW;
+}
+
 //returns 1 if there's an issue
 int APPS_calc(uint16_t *torque){
+    if(!car_state.ready_to_drive) {
+        *torque = 0;
+        return -1;
+    }
     uint16_t fault, t_req = 0;
 
     float apps1 = REMAP0_1(ADC_Vars.APPS1, APPS1_MIN, APPS1_MAX),
@@ -266,7 +295,7 @@ int APPS_calc(uint16_t *torque){
     else
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
 
-    uint16_t h[4] = {(uint16_t)(apps1 * 65536), (uint16_t)(apps2 * 65536), (uint16_t)(c_app * 65536), fault};
+    int16_t h[4] = {(int16_t)(apps1 * 32768), (int16_t)(apps2 * 32768), (int16_t)t_req, (int16_t)fault};
     send_CAN(0x002, 8, (uint8_t*)&h[0]);
 
     GPIOB->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
