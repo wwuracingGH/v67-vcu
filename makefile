@@ -31,3 +31,11 @@ clean:
 .PHONY: cleanall
 cleanall:
 	rm -f *.o *.elf
+
+.PHONY: program
+program:
+	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "program $(BINARY) verify reset exit"
+
+.PHONY: reset
+reset:
+	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "reset"
