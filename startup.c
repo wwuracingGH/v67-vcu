@@ -139,3 +139,14 @@ void default_handler(void)
     while(1);
 }
 
+extern void* memset(void* b, uint32_t c, uint32_t len)
+{
+    uint8_t *p = b;
+    while(len > 0)
+        {
+            *p = c;
+            p++;
+            len--;
+        }
+    return(b);
+}

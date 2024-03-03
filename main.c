@@ -10,23 +10,12 @@
 #include "canDefinitions.h"
 #include "vendor/qfplib/qfplib.h"
 
-/**
- * POT_RESOLUTION = 4096 for 5V
- * APPS_MIN_VALUE = 0.5V
- * APPS_MAX_VALUE = 4.5V
- */
-#define POT_RESOLUTION      4096
-#define APPS1_MIN_FRAC      0.6
-#define APPS1_MAX_FRAC      0.8
-#define APPS2_MIN_FRAC      0.4
-#define APPS2_MAX_FRAC      0.6
-
 #define ROLLING_ADC_FR_POW 5
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW) 
 #define ROLLING_ADC_VALS  (ROLLING_ADC_FRAMES * 4)
 
 #define MIN_TORQUE_REQ      0 //do not change this. car not legally allowed to go backwards.
-#define MAX_TORQUE_REQ      6000
+#define MAX_TORQUE_REQ      100
 
 #define BRAKES_THREASHOLD   500 //change this in the future
 
@@ -35,9 +24,9 @@
 #define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
 #define FABS(x)                 ((x) > 0.0f ? (x) : -(x))
 
-const uint32_t APPS1_MIN    = 300;
+const uint32_t APPS1_MIN    = 375;
 const uint32_t APPS1_MAX    = 4096;
-const uint32_t APPS2_MIN    = 300;
+const uint32_t APPS2_MIN    = 375;
 const uint32_t APPS2_MAX    = 4096;
 const uint32_t FBPS_MIN     = 0;
 const uint32_t FBPS_MAX     = 4092;
@@ -45,10 +34,10 @@ const uint32_t RBPS_MIN     = 0;
 const uint32_t RBPS_MAX     = 4092;
 
 struct __attribute__((packed)) {
-    volatile uint32_t APPS2;
-    volatile uint32_t RBPS;
-    volatile uint32_t FBPS;
-    volatile uint32_t APPS1;
+    volatile uint16_t APPS2;
+    volatile uint16_t RBPS;
+    volatile uint16_t FBPS;
+    volatile uint16_t APPS1;
 } ADC_Vars;
 
 uint16_t ADC_RollingValues[ROLLING_ADC_VALS];
@@ -56,6 +45,7 @@ uint16_t ADC_RollingValues[ROLLING_ADC_VALS];
 struct {
     volatile uint16_t ready_to_drive;
     volatile uint16_t torque_req;
+    uint32_t buzzerTimer;
     union {
         MC_HighSpeed hs;
         uint64_t bits;
@@ -108,12 +98,18 @@ uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     return q;
 }
 
-int32_t canTimer = 0, canTimerReset = 50000;
+int32_t canTimer = 0, canTimerReset = 5000;
 
 int main(){
     //setup
     //clock_init();
     
+    for(int i = 0; i < ROLLING_ADC_VALS; i++){
+        ADC_RollingValues[i] = 0;
+    }
+
+    for(int i = 0; i < 10000000; i++);
+
     GPIO_Init(); //must be called first
 
     GPIOB->ODR |= 1 << 7;
@@ -122,7 +118,7 @@ int main(){
 
     __enable_irq(); //enable interrupts
 
-    MC_Command canmsg = {100, 0, 1, 1, 0, 0, 0, 0};
+    MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
 
     car_state.ready_to_drive = 0;
 
@@ -130,25 +126,42 @@ int main(){
         if(canTimer <= 0){
             APPS_RollingSmooth();
             APPS_calc(&car_state.torque_req);
+            canmsg.inverterEnable = car_state.ready_to_drive;
 
             canmsg.torqueCommand = car_state.torque_req;
 
-            send_CAN(0b001, 8, (uint8_t*)&ADC_Vars.APPS2); 
+            send_CAN(0b001, 8, (uint8_t*)&ADC_Vars.APPS2);
             send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
             
             GPIOB->ODR |= (car_state.ready_to_drive > 0) << 7;
             GPIOB->ODR &= ~((car_state.ready_to_drive == 0) << 7);
 
-            if(!(GPIOB->IDR & GPIO_IDR_1)) RTD_start();
+            if(!(GPIOB->IDR & GPIO_IDR_1) & !car_state.ready_to_drive) {
+                RTD_start();
+            }
 
             canTimer = canTimerReset;
         }
         canTimer--;
+        car_state.buzzerTimer--;
+        recieve_CAN();
+        
+        if(car_state.buzzerTimer <= 0){
+            GPIOB->ODR &= ~GPIO_ODR_5;
+        }
     }
 }
 
 void RTD_start(){
+    car_state.buzzerTimer = 50000;
+    MC_Command disableLockout = {0, 0, 0, 0, 0, 0, 0, 0};
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&disableLockout);
+    for(int i = 0; i < 10000; i++);
+    disableLockout.inverterEnable = 1;
     car_state.ready_to_drive = 1;
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&disableLockout);
+    GPIOB->ODR |= GPIO_ODR_5; //buzzer
+    GPIOB->ODR |= 0b11 << 6;
 }
 
 void clock_init() //see clocks.png
@@ -255,7 +268,8 @@ void GPIO_Init(){
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODER12_Pos); // CAN RX
 
     // no pull up - pull down
-    GPIOA->PUPDR  = 0;
+    GPIOA->PUPDR  = 0 | (0b10 << GPIO_PUPDR_PUPDR1_Pos);
+    GPIOB->PUPDR  = 0;
     GPIOA->AFR[1] = (4 << GPIO_AFRH_AFSEL11_Pos) | (4 << GPIO_AFRH_AFSEL12_Pos); //set up can
 
     GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   // APPS1
@@ -264,22 +278,26 @@ void GPIO_Init(){
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   // LED1
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER7_Pos);  // LED2
     
-    GPIOB->PUPDR  = 0b01 << 2; //button is pulled up
+    GPIOB->PUPDR |= 0b01 << 2; //button is pulled up
 }
 
 //very fast average
 void APPS_RollingSmooth(){
+    uint32_t APPS2 = 0,
+             RBPS  = 0,
+             FBPS  = 0,
+             APPS1 = 0;
     for(int i = 0; i < ROLLING_ADC_VALS; i += 4){
-        ADC_Vars.APPS2 += ADC_RollingValues[i + 0];
-        ADC_Vars.RBPS  += ADC_RollingValues[i + 1];
-        ADC_Vars.FBPS  += ADC_RollingValues[i + 2];
-        ADC_Vars.APPS1 += ADC_RollingValues[i + 3];
+        APPS2 += ADC_RollingValues[i + 0];
+        RBPS  += ADC_RollingValues[i + 1];
+        FBPS  += ADC_RollingValues[i + 2];
+        APPS1 += ADC_RollingValues[i + 3];
     }
 
-    ADC_Vars.APPS2 >>= ROLLING_ADC_FR_POW;
-    ADC_Vars.RBPS  >>= ROLLING_ADC_FR_POW;
-    ADC_Vars.FBPS  >>= ROLLING_ADC_FR_POW;
-    ADC_Vars.APPS1 >>= ROLLING_ADC_FR_POW;
+    ADC_Vars.APPS2 = APPS2 >> ROLLING_ADC_FR_POW;
+    ADC_Vars.RBPS  = RBPS  >> ROLLING_ADC_FR_POW;
+    ADC_Vars.FBPS  = FBPS  >> ROLLING_ADC_FR_POW;
+    ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
 //returns 1 if there's an issue
@@ -292,22 +310,24 @@ int APPS_calc(uint16_t *torque){
 
     float apps1 = REMAP0_1(ADC_Vars.APPS1, APPS1_MIN, APPS1_MAX),
           apps2 = REMAP0_1(ADC_Vars.APPS2, APPS2_MIN, APPS2_MAX),
-          c_app = (apps1 + apps2) * 0.5f;
+          c_app = apps2; //(apps1 + apps2) * 0.5f;
 
-    if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
-        fault = 1;
-    else if (FABS(apps1 - apps2) > 0.1f)
-        fault = 2;
-    else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD)) //TODO: CHANGE THIS WHEN BRAKE SENSORS WORK PLEASE
-        fault = 3;
-    else
+    //if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
+    //    fault = 1;
+    //else if (FABS(apps1 - apps2) > 0.1f)
+    //    fault = 2;
+    //else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD)) //TODO: CHANGE THIS WHEN BRAKE SENSORS WORK PLEASE
+    //    fault = 3;
+    //else
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
+
+    if(t_req < MIN_TORQUE_REQ || t_req > MAX_TORQUE_REQ) t_req = 0;
 
     uint16_t h[4] = {(uint16_t)(apps1 * 1000), (uint16_t)(apps2 * 1000), (uint16_t)t_req, fault};
     send_CAN(0x002, 8, (uint8_t*)&h[0]);
 
-    //GPIOB->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
-    //GPIOB->ODR |= fault << 6;
+    GPIOB->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
+    GPIOB->ODR |= fault << 6;
 
     *torque = t_req;
     return fault;
