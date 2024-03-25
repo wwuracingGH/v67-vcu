@@ -19,19 +19,23 @@
 
 #define BRAKES_THREASHOLD   500 //change this in the future
 
-#define CONSTINV(n)             (1.0f / (float)(n)) //hopefully is forced to compile to a constant float with const variables
+#define CONSTINV(n)             (1.0f / (float)(n)) //TODO: change all of the devisors to precomputed const values
 #define REMAP0_1(n, min, max)   ((float)(n - min) * CONSTINV(max - min))
 #define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
 #define FABS(x)                 ((x) > 0.0f ? (x) : -(x))
 
-const uint32_t APPS1_MIN    = 375;
-const uint32_t APPS1_MAX    = 4096;
-const uint32_t APPS2_MIN    = 375;
-const uint32_t APPS2_MAX    = 4096;
+const uint32_t APPS1_MIN    = 1500;
+const uint32_t APPS1_MAX    = 3700;
+const uint32_t APPS2_MIN    = 400;
+const uint32_t APPS2_MAX    = 2550;
 const uint32_t FBPS_MIN     = 0;
 const uint32_t FBPS_MAX     = 4092;
 const uint32_t RBPS_MIN     = 0;
 const uint32_t RBPS_MAX     = 4092;
+
+//these values enable apps min and max to both be slightly inside pedal travel to produce a sort of "deadzone" effect.
+const float SENSOR_MIN = -0.10f;
+const float SENSOR_MAX =  1.10f;
 
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
@@ -50,6 +54,14 @@ struct {
         MC_HighSpeed hs;
         uint64_t bits;
     } hsmessage;
+    union {
+        DL_WheelSpeed ws;
+        uint64_t bits;
+    } wheelspeed;
+    union {
+        DL_CarAcceleration ca;
+        uint32_t bits;
+    } acceleration;
 } car_state;
 
 typedef struct _canmsg{
@@ -66,14 +78,16 @@ enum Pin_Mode {
 };
 
 void clock_init();
-void ADC_DMA_Init();
+void ADC_DMA_Init(uint32_t *dest, uint32_t size);
 void GPIO_Init();
 void CAN_Init();
 
 void default_handler();
+void Control();
+void Input();
 
 void APPS_RollingSmooth();
-int APPS_calc();
+int  APPS_calc(uint16_t*, uint16_t);
 void send_CAN(uint16_t, uint8_t, uint8_t*);
 void process_CAN(CAN_msg);
 void recieve_CAN();
@@ -85,9 +99,16 @@ uint32_t clz(uint32_t i){
     return j;
 }
 
+//shit function lol
+uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v){
+    uint32_t div = u;
+    while(div > v) div -= v;
+    return div;
+}
+
 uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     uint32_t q = 0, k = clz(u) - clz(v);
-    v << k;
+    v = v << k;
     k = 1 << k;
     do {
         if(v >= u) continue;
@@ -98,97 +119,108 @@ uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
     return q;
 }
 
-int32_t canTimer = 0, canTimerReset = 5000;
+//what gets sent to the motor controller
+MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
 
 int main(){
     //setup
     //clock_init();
-    
+
+    //SysTick_Config(48000); // 48MHZ / 48000 = 1 tick every ms
+    __enable_irq(); //enable interrupts
+                    //
     for(int i = 0; i < ROLLING_ADC_VALS; i++){
         ADC_RollingValues[i] = 0;
     }
 
-    for(int i = 0; i < 10000000; i++);
-
     GPIO_Init(); //must be called first
 
-    GPIOB->ODR |= 1 << 7;
     ADC_DMA_Init(ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
 
-    __enable_irq(); //enable interrupts
-
-    MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
 
     car_state.ready_to_drive = 0;
 
-    for(;;) {
-        if(canTimer <= 0){
-            APPS_RollingSmooth();
-            APPS_calc(&car_state.torque_req);
-            canmsg.inverterEnable = car_state.ready_to_drive;
+    //non rt program bits
+    for(;;){     
+        for (int i = 0; i < 4800000; i++);
+        GPIOB->ODR |= 1 << 7;
+    }
+}
 
-            canmsg.torqueCommand = car_state.torque_req;
+uint32_t program_ticks;
+uint16_t controlDiv = 5, //how many milliseconds between control loop
+         inputDiv = 50, //how many milliseconds between input parses
+         recieveDiv = 20; //how many milliseconds between can processes 
 
-            send_CAN(0b001, 8, (uint8_t*)&ADC_Vars.APPS2);
-            send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
-            
-            GPIOB->ODR |= (car_state.ready_to_drive > 0) << 7;
-            GPIOB->ODR &= ~((car_state.ready_to_drive == 0) << 7);
-
-            if(!(GPIOB->IDR & GPIO_IDR_1) & !car_state.ready_to_drive) {
-                RTD_start();
-            }
-
-            canTimer = canTimerReset;
-        }
-        canTimer--;
-        car_state.buzzerTimer--;
+//runs every 1 ms
+void systick_handler()
+{ 
+    program_ticks++;
+    
+    if(){
+        Control();       
+    }
+    if(program_ticks % inputDiv == 0){
+        Input();       
+    }
+    if(program_ticks % recieveDiv == 0){
         recieve_CAN();
-        
-        if(car_state.buzzerTimer <= 0){
-            GPIOB->ODR &= ~GPIO_ODR_5;
-        }
+    }
+    if(car_state.buzzerTimer == 0){
+        GPIOB->ODR &= ~GPIO_ODR_5;
+        car_state.ready_to_drive = 1;
+        car_state.buzzerTimer --;
+    }
+    if (car_state.buzzerTimer >= 0) car_state.buzzerTimer--;
+
+    if (program_ticks == 1000) program_ticks = 0;
+}
+
+static uint16_t lastAPPSFault = 0;
+
+void Control() {
+    APPS_RollingSmooth();
+    lastAPPSFault = APPS_calc(&car_state.torque_req, lastAPPSFault);
+    canmsg.inverterEnable = car_state.ready_to_drive;
+    
+    if(car_state.ready_to_drive)
+        canmsg.torqueCommand = car_state.torque_req;
+
+    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);        
+    
+    GPIOB->ODR |= (car_state.ready_to_drive > 0) << 7;
+    GPIOB->ODR &= ~((car_state.ready_to_drive == 0) << 7);
+}
+
+void Input(){
+    if(!(GPIOB->IDR & GPIO_IDR_1) & !car_state.ready_to_drive) {   
+        RTD_start();
     }
 }
 
 void RTD_start(){
-    car_state.buzzerTimer = 50000;
-    MC_Command disableLockout = {0, 0, 0, 0, 0, 0, 0, 0};
-    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&disableLockout);
-    for(int i = 0; i < 10000; i++);
-    disableLockout.inverterEnable = 1;
-    car_state.ready_to_drive = 1;
-    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&disableLockout);
+    car_state.buzzerTimer = 3000; //buzzer timer in ms
     GPIOB->ODR |= GPIO_ODR_5; //buzzer
-    GPIOB->ODR |= 0b11 << 6;
 }
 
-void clock_init() //see clocks.png
+void clock_init() //turns on hsi48 and sets as system clock
 {
     //wait one clock cycle before accessing flash memory @48MHZ
-    FLASH->ACR |= FLASH_ACR_LATENCY;
+    FLASH->ACR |= 0b001 << FLASH_ACR_LATENCY_Pos;
 
-    GPIOB->ODR |= 1 << 6;
+    // Enables HSI48 oscillator
+    RCC->CR2  |= RCC_CR2_HSI48ON;
+    while (!(RCC->CR2 & RCC_CR2_HSI48RDY));
+    
+    //no peripheral prescaler div or hsi prescaler div
+    RCC->CFGR &= ~(0b111 << RCC_CFGR_PPRE_Pos);
+    RCC->CFGR &= ~(0b1111 << RCC_CFGR_HPRE_Pos);
 
-    // Enables HSE oscillator
-    RCC->CR  |= RCC_CR_CSSON | RCC_CR_HSEON;
-    while (!(RCC->CR & RCC_CR_HSERDY));
-    RCC->CIR |= RCC_CIR_HSERDYC;
-    RCC->CFGR |= RCC_CFGR_SW_0;
-
-    //don't technically need either of these, but sets prediv for both (useful when transfering to different stm)
-    RCC->CFGR |= RCC_CFGR_PPRE_DIV1 | RCC_CFGR_PLLXTPRE_HSE_PREDIV_DIV1;
-
-    //Set up PLL
-    RCC->CFGR 	|= RCC_CFGR_PLLSRC;
-    RCC->CFGR 	|= RCC_CFGR_PLLMUL6;
-    RCC->CR     |= RCC_CR_PLLON;
-    while (!(RCC->CR & RCC_CR_PLLRDY));
-
-    // Enable PLL
-    RCC->CFGR |= RCC_CFGR_SW_PLL;
-    while (! (RCC->CFGR & RCC_CFGR_SWS_PLL));
+    // sets system clock as HSI48 oscillator
+    RCC->CFGR |= 0b11 << RCC_CFGR_SW_Pos;
+    while (!(RCC->CFGR & (0b11 << RCC_CFGR_SWS_Pos)));
 }
 
 void ADC_DMA_Init(uint32_t *dest, uint32_t size){
@@ -300,34 +332,64 @@ void APPS_RollingSmooth(){
     ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
+//
+int GetTCMax(float coeff_friction){
+    const float mass_KG = 240;
+    const float rearAxel_Moment = 0.78f;
+    const float gravity = 9.81f;
+    const float cg_height = 22.86f;
+    const float wheelbase = 1.54f;
+    const float wheelbasediv = 1.0f/wheelbase;
+
+    float rearAxel_Force_Z = ((2 * (wheelbase - rearAxel_Moment) * gravity) 
+        + (cg_height * car_state.acceleration.ca.carAccel_X)) 
+        * (0.5f * wheelbasediv)
+        * mass_KG;
+    float rearAxel_Force_Y = (wheelbase - rearAxel_Moment) * wheelbasediv * mass_KG 
+        * car_state.acceleration.ca.carAccel_Y;
+}
+
 //returns 1 if there's an issue
-int APPS_calc(uint16_t *torque){
+int APPS_calc(uint16_t *torque, uint16_t lastFault){
     if(!car_state.ready_to_drive) {
         *torque = 0;
         return -1;
     }
     uint16_t fault = 0, t_req = 0;
+    
+    float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
+    float apps2div = 1.0f / (APPS2_MAX - APPS2_MIN);
 
-    float apps1 = REMAP0_1(ADC_Vars.APPS1, APPS1_MIN, APPS1_MAX),
-          apps2 = REMAP0_1(ADC_Vars.APPS2, APPS2_MIN, APPS2_MAX),
-          c_app = apps2; //(apps1 + apps2) * 0.5f;
+    float apps1 = ((float)ADC_Vars.APPS1 - APPS1_MIN) * apps1div,
+          apps2 = ((float)ADC_Vars.APPS2 - APPS2_MIN) * apps2div;
+    
 
-    //if(apps1 < 0.0f || apps2 < 0.0f || apps2 > 1.0f || apps1 > 1.0f)
-    //    fault = 1;
-    //else if (FABS(apps1 - apps2) > 0.1f)
-    //    fault = 2;
-    //else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD)) //TODO: CHANGE THIS WHEN BRAKE SENSORS WORK PLEASE
-    //    fault = 3;
-    //else
+    if(apps1 < SENSOR_MIN || apps2 < SENSOR_MIN || apps1 > SENSOR_MAX || apps2 > SENSOR_MAX)
+        fault = 1;
+    else {
+        apps1 = (apps1 > 1.0f) ? 1.0f : apps1;
+        apps1 = (apps1 < 0.0f) ? 0.0f : apps1;
+        apps2 = (apps2 > 1.0f) ? 1.0f : apps2;
+        apps2 = (apps2 < 0.0f) ? 0.0f : apps2;
+    }
+
+    float c_app = (apps1 + apps2) * 0.5f;
+
+    if      (lastFault == 3 && c_app > 0.05f)
+        fault = 3;
+    else if (fault == 1)
+                 ;
+    else if (FABS(apps1 - apps2) > 0.1f && !fault)
+        fault = 2;
+    else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
+        fault = 3;
+    else
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
 
-    if(t_req < MIN_TORQUE_REQ || t_req > MAX_TORQUE_REQ) t_req = 0;
-
-    uint16_t h[4] = {(uint16_t)(apps1 * 1000), (uint16_t)(apps2 * 1000), (uint16_t)t_req, fault};
+    if (t_req > MAX_TORQUE_REQ) t_req = MAX_TORQUE_REQ;
+ 
+    uint16_t h[4] = {(uint16_t)(apps1 * 1000), (uint16_t)(apps2 * 1000), (uint16_t)t_req, (uint16_t)fault};
     send_CAN(0x002, 8, (uint8_t*)&h[0]);
-
-    GPIOB->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
-    GPIOB->ODR |= fault << 6;
 
     *torque = t_req;
     return fault;

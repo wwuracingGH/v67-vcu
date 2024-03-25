@@ -29,6 +29,11 @@ typedef int16_t     MC_Int;
 typedef uint16_t    MC_UnsignedInt;
 typedef uint8_t     MC_Byte;
 
+#define VCU_CANID_APPS_RAW                 0x001
+#define VCU_CANID_CALIBRATION              0x002
+#define VCU_CANID_WHEELSPEED               0x003
+#define VCU_CANID_ACCEL                    0x004
+
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1
 #define MC_CANID_TEMPERATURE3              0x0A2
@@ -270,3 +275,15 @@ MC_CANSTRUCT {
     MC_Byte             _RESERVED : 5;
     MC_Torque           torqueLimit;
 } MC_Command;
+
+MC_CANSTRUCT {
+    uint16_t wheelSpeed_FL;
+    uint16_t wheelSpeed_FR;
+    uint16_t wheelSpeed_BL;
+    uint16_t wheelSpeed_BR;
+} DL_WheelSpeed;
+
+MC_CANSTRUCT {
+    uint16_t carAccel_X;
+    uint16_t carAccel_Y;
+} DL_CarAcceleration;

@@ -1,0 +1,8 @@
+-D
+STM32F042x6 
+-I
+vendor/CMSIS/Device/ST/STM32F0/Include \
+-I
+vendor/CMSIS/CMSIS/Core/Include
+-I 
+vendor/qfplib
