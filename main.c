@@ -37,6 +37,10 @@ const uint32_t RBPS_MAX     = 4092;
 const float SENSOR_MIN = -0.10f;
 const float SENSOR_MAX =  1.10f;
 
+const uint16_t controlReset = 5, //how many milliseconds between control loop
+               inputReset = 50, //how many milliseconds between input parses
+               recieveReset = 20; //how many milliseconds between can processes
+ 
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
     volatile uint16_t RBPS;
@@ -50,6 +54,8 @@ struct {
     volatile uint16_t ready_to_drive;
     volatile uint16_t torque_req;
     uint32_t buzzerTimer;
+    uint16_t controlTimer, inputTimer, recieveTimer;
+    uint16_t lastAPPSFault;
     union {
         MC_HighSpeed hs;
         uint64_t bits;
@@ -124,64 +130,63 @@ MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
 
 int main(){
     //setup
-    //clock_init();
+    clock_init();
 
-    //SysTick_Config(48000); // 48MHZ / 48000 = 1 tick every ms
-    __enable_irq(); //enable interrupts
-                    //
     for(int i = 0; i < ROLLING_ADC_VALS; i++){
         ADC_RollingValues[i] = 0;
     }
 
+    car_state.ready_to_drive = 0;
+    car_state.controlTimer = 0;
+    car_state.inputTimer = 0;
+    car_state.recieveTimer = 0;  
+    car_state.buzzerTimer = 0;
+
     GPIO_Init(); //must be called first
 
-    ADC_DMA_Init(ADC_RollingValues, ROLLING_ADC_VALS);
+    ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
 
-
-    car_state.ready_to_drive = 0;
-
+    SysTick_Config(48000); // 48MHZ / 48000 = 1 tick every ms
+    __enable_irq(); //enable interrupts
+   
     //non rt program bits
-    for(;;){     
-        for (int i = 0; i < 4800000; i++);
-        GPIOB->ODR |= 1 << 7;
+    for(;;){
+        
     }
 }
-
-uint32_t program_ticks;
-uint16_t controlDiv = 5, //how many milliseconds between control loop
-         inputDiv = 50, //how many milliseconds between input parses
-         recieveDiv = 20; //how many milliseconds between can processes 
 
 //runs every 1 ms
 void systick_handler()
-{ 
-    program_ticks++;
-    
-    if(){
-        Control();       
+{   
+    if(car_state.controlTimer == 0){
+        Control(); 
+        car_state.controlTimer = controlReset;
     }
-    if(program_ticks % inputDiv == 0){
-        Input();       
+    if(car_state.inputTimer == 0){
+        Input();
+        car_state.inputTimer = inputReset;
+        GPIOB->ODR ^= (1 << 6);
     }
-    if(program_ticks % recieveDiv == 0){
+    if(car_state.recieveTimer == 0){
         recieve_CAN();
+        car_state.recieveTimer = recieveReset;
     }
-    if(car_state.buzzerTimer == 0){
-        GPIOB->ODR &= ~GPIO_ODR_5;
-        car_state.ready_to_drive = 1;
-        car_state.buzzerTimer --;
+    if(car_state.buzzerTimer == 1){
+        GPIOB->ODR &= ~GPIO_ODR_5; //turn off that annoying ass buzzer
     }
-    if (car_state.buzzerTimer >= 0) car_state.buzzerTimer--;
+    if (car_state.buzzerTimer > 0) car_state.buzzerTimer--;
 
-    if (program_ticks == 1000) program_ticks = 0;
+    car_state.controlTimer--;
+    car_state.recieveTimer--;
+    car_state.inputTimer--;
+    car_state.buzzerTimer--;
 }
 
-static uint16_t lastAPPSFault = 0;
 
 void Control() {
     APPS_RollingSmooth();
-    lastAPPSFault = APPS_calc(&car_state.torque_req, lastAPPSFault);
+    car_state.lastAPPSFault = APPS_calc(&car_state.torque_req, car_state.lastAPPSFault);
     canmsg.inverterEnable = car_state.ready_to_drive;
     
     if(car_state.ready_to_drive)
@@ -195,14 +200,16 @@ void Control() {
 }
 
 void Input(){
-    if(!(GPIOB->IDR & GPIO_IDR_1) & !car_state.ready_to_drive) {   
+    if(!(GPIOB->IDR & GPIO_IDR_1) && !car_state.ready_to_drive){ 
         RTD_start();
     }
 }
 
 void RTD_start(){
+    if (!((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))) return;   
     car_state.buzzerTimer = 3000; //buzzer timer in ms
     GPIOB->ODR |= GPIO_ODR_5; //buzzer
+    car_state.ready_to_drive = 1;
 }
 
 void clock_init() //turns on hsi48 and sets as system clock
@@ -273,7 +280,7 @@ void CAN_Init (){
     CAN->MCR &= ~CAN_MCR_SLEEP;
     while (CAN->MSR & CAN_MSR_SLAK);
 
-    CAN->BTR |= 3 << CAN_BTR_BRP_Pos | 1 << CAN_BTR_TS1_Pos | 0 << CAN_BTR_TS2_Pos;
+    CAN->BTR |= 23 << CAN_BTR_BRP_Pos | 1 << CAN_BTR_TS1_Pos | 0 << CAN_BTR_TS2_Pos;
     CAN->MCR &= ~CAN_MCR_INRQ;
     
     while (CAN->MSR & CAN_MSR_INAK);
@@ -332,7 +339,7 @@ void APPS_RollingSmooth(){
     ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
-//
+
 int GetTCMax(float coeff_friction){
     const float mass_KG = 240;
     const float rearAxel_Moment = 0.78f;
@@ -341,28 +348,28 @@ int GetTCMax(float coeff_friction){
     const float wheelbase = 1.54f;
     const float wheelbasediv = 1.0f/wheelbase;
 
-    float rearAxel_Force_Z = ((2 * (wheelbase - rearAxel_Moment) * gravity) 
+    const float ellipseOblongConst = 1.2f; //reciprocal of how weak the side friction is compared to the long friction
+
+    float rearAxel_downforce = ((2 * (wheelbase - rearAxel_Moment) * gravity) 
         + (cg_height * car_state.acceleration.ca.carAccel_X)) 
         * (0.5f * wheelbasediv)
         * mass_KG;
     float rearAxel_Force_Y = (wheelbase - rearAxel_Moment) * wheelbasediv * mass_KG 
         * car_state.acceleration.ca.carAccel_Y;
+
+    float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
+
 }
 
 //returns 1 if there's an issue
 int APPS_calc(uint16_t *torque, uint16_t lastFault){
-    if(!car_state.ready_to_drive) {
-        *torque = 0;
-        return -1;
-    }
     uint16_t fault = 0, t_req = 0;
     
-    float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
-    float apps2div = 1.0f / (APPS2_MAX - APPS2_MIN);
+    const float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
+    const float apps2div = 1.0f / (APPS2_MAX - APPS2_MIN);
 
     float apps1 = ((float)ADC_Vars.APPS1 - APPS1_MIN) * apps1div,
-          apps2 = ((float)ADC_Vars.APPS2 - APPS2_MIN) * apps2div;
-    
+          apps2 = ((float)ADC_Vars.APPS2 - APPS2_MIN) * apps2div; 
 
     if(apps1 < SENSOR_MIN || apps2 < SENSOR_MIN || apps1 > SENSOR_MAX || apps2 > SENSOR_MAX)
         fault = 1;
@@ -375,22 +382,21 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 
     float c_app = (apps1 + apps2) * 0.5f;
 
-    if      (lastFault == 3 && c_app > 0.05f)
+    if      (lastFault == 3 && c_app > 0.05f) //if there was APPS/BrakePlausability and apps is still > 5%
         fault = 3;
     else if (fault == 1)
                  ;
-    else if (FABS(apps1 - apps2) > 0.1f && !fault)
+    else if (FABS(apps1 - apps2) > 0.1f)
         fault = 2;
     else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
         fault = 3;
-    else
+    else if (!car_state.ready_to_drive);
+    else //if there are no faults
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
-
-    if (t_req > MAX_TORQUE_REQ) t_req = MAX_TORQUE_REQ;
  
     uint16_t h[4] = {(uint16_t)(apps1 * 1000), (uint16_t)(apps2 * 1000), (uint16_t)t_req, (uint16_t)fault};
     send_CAN(0x002, 8, (uint8_t*)&h[0]);
-
+    
     *torque = t_req;
     return fault;
 }
