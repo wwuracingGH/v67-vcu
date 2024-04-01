@@ -37,10 +37,11 @@ const uint32_t RBPS_MAX     = 4092;
 const float SENSOR_MIN = -0.10f;
 const float SENSOR_MAX =  1.10f;
 
-const uint16_t controlReset = 5, //how many milliseconds between control loop
-               inputReset = 50, //how many milliseconds between input parses
-               recieveReset = 20; //how many milliseconds between can processes
- 
+const uint16_t controlReset = 5,  //how many milliseconds between control loop
+               inputReset = 50,   //how many milliseconds between input parses
+               recieveReset = 20, //how many milliseconds between can processes
+               diagReset = 100;   //how many milliseconds between diagnostic can sends
+
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
     volatile uint16_t RBPS;
@@ -54,8 +55,12 @@ struct {
     volatile uint16_t ready_to_drive;
     volatile uint16_t torque_req;
     uint32_t buzzerTimer;
-    uint16_t controlTimer, inputTimer, recieveTimer;
+    uint16_t controlTimer, inputTimer, recieveTimer, diagTimer;
+    uint8_t controlQue, inputQue, recieveQue, diagQue;
     uint16_t lastAPPSFault;
+    struct{
+        uint16_t apps1, apps2, torque, fault;
+    } APPSCalib;
     union {
         MC_HighSpeed hs;
         uint64_t bits;
@@ -91,6 +96,7 @@ void CAN_Init();
 void default_handler();
 void Control();
 void Input();
+void send_Diagnostics();
 
 void APPS_RollingSmooth();
 int  APPS_calc(uint16_t*, uint16_t);
@@ -141,7 +147,8 @@ int main(){
     car_state.inputTimer = 0;
     car_state.recieveTimer = 0;  
     car_state.buzzerTimer = 0;
-
+    car_state.diagTimer = 0;
+    
     GPIO_Init(); //must be called first
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
@@ -152,7 +159,10 @@ int main(){
    
     //non rt program bits
     for(;;){
-        
+        if(car_state.controlQue) Control();
+        if(car_state.inputQue)   Input();
+        if(car_state.recieveQue) recieve_CAN();
+        if(car_state.diagQue)    send_Diagnostics();
     }
 }
 
@@ -160,17 +170,20 @@ int main(){
 void systick_handler()
 {   
     if(car_state.controlTimer == 0){
-        Control(); 
+        car_state.controlQue = 1;
         car_state.controlTimer = controlReset;
     }
     if(car_state.inputTimer == 0){
-        Input();
+        car_state.inputQue = 1;
         car_state.inputTimer = inputReset;
-        GPIOB->ODR ^= (1 << 6);
     }
     if(car_state.recieveTimer == 0){
-        recieve_CAN();
+        car_state.recieveQue = 1;
         car_state.recieveTimer = recieveReset;
+    }
+    if(car_state.diagTimer == 0){
+        car_state.diagQue = 1;
+        car_state.diagTimer = diagReset;
     }
     if(car_state.buzzerTimer == 1){
         GPIOB->ODR &= ~GPIO_ODR_5; //turn off that annoying ass buzzer
@@ -181,18 +194,17 @@ void systick_handler()
     car_state.recieveTimer--;
     car_state.inputTimer--;
     car_state.buzzerTimer--;
+    car_state.diagTimer--;
 }
 
-
 void Control() {
+    car_state.controlQue = 0;
     APPS_RollingSmooth();
     car_state.lastAPPSFault = APPS_calc(&car_state.torque_req, car_state.lastAPPSFault);
     canmsg.inverterEnable = car_state.ready_to_drive;
     
     if(car_state.ready_to_drive)
         canmsg.torqueCommand = car_state.torque_req;
-
-    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
     send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);        
     
     GPIOB->ODR |= (car_state.ready_to_drive > 0) << 7;
@@ -200,9 +212,16 @@ void Control() {
 }
 
 void Input(){
+    car_state.inputQue = 0;
     if(!(GPIOB->IDR & GPIO_IDR_1) && !car_state.ready_to_drive){ 
         RTD_start();
     }
+}
+
+void send_Diagnostics(){
+    car_state.diagQue = 0;
+    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
+    send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
 }
 
 void RTD_start(){
@@ -298,8 +317,10 @@ void GPIO_Init(){
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
 
-    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   // set porta 0 as digital input
+    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   // PORTA_GPIO
                  |  (MODE_ANALOG    << GPIO_MODER_MODER1_Pos)   // APPS2
+                 |  (MODE_INPUT     << GPIO_MODER_MODER3_Pos)   // PORTA_GPIO
+                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   // PORTA_GPIO
                  |  (MODE_ANALOG    << GPIO_MODER_MODER5_Pos)   // RBPS
                  |  (MODE_ANALOG    << GPIO_MODER_MODER6_Pos)   // FBPS
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos)   // RTD_LIGHT
@@ -313,11 +334,12 @@ void GPIO_Init(){
 
     GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   // APPS1
                  |  (MODE_INPUT     << GPIO_MODER_MODER1_Pos)   // RTD_BUTTON
+                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   // PORTB_GPIO
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos)   // BUZZER
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   // LED1
-                 |  (MODE_OUTPUT    << GPIO_MODER_MODER7_Pos);  // LED2
+                 |  (MODE_INPUT     << GPIO_MODER_MODER7_Pos);  // PORTB_GPIO
     
-    GPIOB->PUPDR |= 0b01 << 2; //button is pulled up
+    GPIOB->PUPDR |= 0b01 << GPIO_PUPDR_PUPDR1_Pos; //button is pulled up
 }
 
 //very fast average
@@ -358,7 +380,8 @@ int GetTCMax(float coeff_friction){
         * car_state.acceleration.ca.carAccel_Y;
 
     float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
-
+    
+    
 }
 
 //returns 1 if there's an issue
@@ -394,8 +417,10 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     else //if there are no faults
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
  
-    uint16_t h[4] = {(uint16_t)(apps1 * 1000), (uint16_t)(apps2 * 1000), (uint16_t)t_req, (uint16_t)fault};
-    send_CAN(0x002, 8, (uint8_t*)&h[0]);
+    car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
+    car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
+    car_state.APPSCalib.torque = (uint16_t)t_req;
+    car_state.APPSCalib.fault  = (uint16_t)fault;
     
     *torque = t_req;
     return fault;
@@ -416,6 +441,7 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
 }
 
 void recieve_CAN(){
+    car_state.recieveQue = 0;
     while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
         uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
         uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
