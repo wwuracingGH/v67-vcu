@@ -33,6 +33,7 @@ typedef uint8_t     MC_Byte;
 #define VCU_CANID_CALIBRATION              0x002
 #define VCU_CANID_WHEELSPEED               0x003
 #define VCU_CANID_ACCEL                    0x004
+#define VCU_CANID_STATE                    0x005
 
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1
@@ -275,6 +276,14 @@ MC_CANSTRUCT {
     MC_Byte             _RESERVED : 5;
     MC_Torque           torqueLimit;
 } MC_Command;
+
+MC_CANSTRUCT {
+    uint16_t High;
+    uint16_t Low;
+    uint8_t _RESERVED;
+    uint8_t  readWrite;
+    uint16_t parameterAdress;
+} MC_ParameterCommand;
 
 MC_CANSTRUCT {
     uint16_t wheelSpeed_FL;

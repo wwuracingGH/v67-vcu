@@ -9,6 +9,7 @@
 #include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
 #include "canDefinitions.h"
 #include "vendor/qfplib/qfplib.h"
+#include "rtos.h"
 
 #define ROLLING_ADC_FR_POW 5
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW) 
@@ -37,10 +38,10 @@ const uint32_t RBPS_MAX     = 4092;
 const float SENSOR_MIN = -0.10f;
 const float SENSOR_MAX =  1.10f;
 
-const uint16_t controlReset = 5,  //how many milliseconds between control loop
-               inputReset = 50,   //how many milliseconds between input parses
-               recieveReset = 20, //how many milliseconds between can processes
-               diagReset = 100;   //how many milliseconds between diagnostic can sends
+const uint16_t controlPeriod = 5,  //how many milliseconds between control loop
+               inputPeriod = 50,   //how many milliseconds between input parses
+               recievePeriod = 20, //how many milliseconds between can processes
+               diagPeriod = 100;   //how many milliseconds between diagnostic can sends
 
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
@@ -52,11 +53,8 @@ struct __attribute__((packed)) {
 uint16_t ADC_RollingValues[ROLLING_ADC_VALS];
 
 struct {
-    volatile uint16_t ready_to_drive;
+    int state_idle, state_rtd;
     volatile uint16_t torque_req;
-    uint32_t buzzerTimer;
-    uint16_t controlTimer, inputTimer, recieveTimer, diagTimer;
-    uint8_t controlQue, inputQue, recieveQue, diagQue;
     uint16_t lastAPPSFault;
     struct{
         uint16_t apps1, apps2, torque, fault;
@@ -95,7 +93,8 @@ void CAN_Init();
 
 void default_handler();
 void Control();
-void Input();
+void InputIdle();
+void InputRTD();
 void send_Diagnostics();
 
 void APPS_RollingSmooth();
@@ -105,34 +104,10 @@ void process_CAN(CAN_msg);
 void recieve_CAN();
 void RTD_start();
 
-uint32_t clz(uint32_t i){
-    uint32_t j = 0, n = i;
-    while((n = n >> 1)) j++;
-    return j;
-}
-
-//shit function lol
-uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v){
-    uint32_t div = u;
-    while(div > v) div -= v;
-    return div;
-}
-
-uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
-    uint32_t q = 0, k = clz(u) - clz(v);
-    v = v << k;
-    k = 1 << k;
-    do {
-        if(v >= u) continue;
-        u -= v;
-        q += k;
-    }
-    while(v = v >> 1, (k = k >> 1));
-    return q;
-}
-
 //what gets sent to the motor controller
 MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
+
+kernel rtos_scheduler = {0, {0}, 0, 0, {0}, 0, 0, 0}; 
 
 int main(){
     //setup
@@ -142,93 +117,85 @@ int main(){
         ADC_RollingValues[i] = 0;
     }
 
-    car_state.ready_to_drive = 0;
-    car_state.controlTimer = 0;
-    car_state.inputTimer = 0;
-    car_state.recieveTimer = 0;  
-    car_state.buzzerTimer = 0;
-    car_state.diagTimer = 0;
-    
     GPIO_Init(); //must be called first
+
+    car_state.state_idle = RTOS_addState(0, 0);
+    car_state.state_rtd  = RTOS_addState(RTD_start, 0);
+
+    RTOS_switchState(car_state.state_idle);
+
+    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    
+    RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
-
+    //                               |   |   |   |       |   |   |   |
+    MC_ParameterCommand shutup = { 0b0000000000000010, 0b0001110011100111, 0, 1, 148};
+    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
+    
     SysTick_Config(48000); // 48MHZ / 48000 = 1 tick every ms
     __enable_irq(); //enable interrupts
    
     //non rt program bits
     for(;;){
-        if(car_state.controlQue) Control();
-        if(car_state.inputQue)   Input();
-        if(car_state.recieveQue) recieve_CAN();
-        if(car_state.diagQue)    send_Diagnostics();
+        //RTOS_ExecuteTasks();
+        GPIOB->ODR |= (rtos_scheduler.state == car_state.state_rtd) << 7;
+        GPIOB->ODR &= ~((rtos_scheduler.state != car_state.state_rtd) << 7);
     }
 }
 
 //runs every 1 ms
 void systick_handler()
 {   
-    if(car_state.controlTimer == 0){
-        car_state.controlQue = 1;
-        car_state.controlTimer = controlReset;
-    }
-    if(car_state.inputTimer == 0){
-        car_state.inputQue = 1;
-        car_state.inputTimer = inputReset;
-    }
-    if(car_state.recieveTimer == 0){
-        car_state.recieveQue = 1;
-        car_state.recieveTimer = recieveReset;
-    }
-    if(car_state.diagTimer == 0){
-        car_state.diagQue = 1;
-        car_state.diagTimer = diagReset;
-    }
-    if(car_state.buzzerTimer == 1){
-        GPIOB->ODR &= ~GPIO_ODR_5; //turn off that annoying ass buzzer
-    }
-    if (car_state.buzzerTimer > 0) car_state.buzzerTimer--;
-
-    car_state.controlTimer--;
-    car_state.recieveTimer--;
-    car_state.inputTimer--;
-    car_state.buzzerTimer--;
-    car_state.diagTimer--;
+    RTOS_Update();
 }
 
 void Control() {
-    car_state.controlQue = 0;
     APPS_RollingSmooth();
     car_state.lastAPPSFault = APPS_calc(&car_state.torque_req, car_state.lastAPPSFault);
-    canmsg.inverterEnable = car_state.ready_to_drive;
-    
-    if(car_state.ready_to_drive)
-        canmsg.torqueCommand = car_state.torque_req;
-    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);        
-    
-    GPIOB->ODR |= (car_state.ready_to_drive > 0) << 7;
-    GPIOB->ODR &= ~((car_state.ready_to_drive == 0) << 7);
+
+    canmsg.torqueCommand = car_state.torque_req;
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
 }
 
-void Input(){
-    car_state.inputQue = 0;
-    if(!(GPIOB->IDR & GPIO_IDR_1) && !car_state.ready_to_drive){ 
-        RTD_start();
+void InputIdle(){
+    if(!(GPIOB->IDR & GPIO_IDR_1) && 
+            ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN)))
+    {
+        RTOS_switchState(car_state.state_rtd);
     }
 }
 
+void InputRTD(){
+
+}
+
 void send_Diagnostics(){
-    car_state.diagQue = 0;
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
+
+    //yikes, variable declaration. get rid of this!!!
+    uint8_t statemsg[2] = {
+        RTOS_inState(car_state.state_idle),
+        RTOS_inState(car_state.state_rtd)
+    };
+    send_CAN(VCU_CANID_STATE, 2, statemsg);
+}
+
+void __turn_that_buzzer_the_fuck_off(){
+    GPIOB->ODR &= ~GPIO_ODR_5; //turns that buzzer the fuck off 
 }
 
 void RTD_start(){
-    if (!((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))) return;   
-    car_state.buzzerTimer = 3000; //buzzer timer in ms
     GPIOB->ODR |= GPIO_ODR_5; //buzzer
-    car_state.ready_to_drive = 1;
+    canmsg.inverterEnable = 1;
+    RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 3000);
 }
 
 void clock_init() //turns on hsi48 and sets as system clock
@@ -311,7 +278,7 @@ void CAN_Init (){
     CAN->FMR &=~ CAN_FMR_FINIT;
     CAN->IER |= CAN_IER_FMPIE0;
 }
-
+    
 void GPIO_Init(){
     //turn on gpio clocks
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
@@ -413,7 +380,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
         fault = 2;
     else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
         fault = 3;
-    else if (!car_state.ready_to_drive);
+    else if (RTOS_inState(car_state.state_idle));
     else //if there are no faults
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
  
@@ -441,7 +408,6 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
 }
 
 void recieve_CAN(){
-    car_state.recieveQue = 0;
     while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
         uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
         uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);

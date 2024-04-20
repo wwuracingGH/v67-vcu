@@ -151,5 +151,38 @@ extern void* memset(void* b, uint32_t c, uint32_t len)
     return(b);
 }
 
+extern void memcpy(void *dest, void *src, uint32_t n)  
+{    
+    uint8_t *csrc = (uint8_t *)src;  
+    uint8_t *cdest = (uint8_t *)dest;  
+  
+    // Copy contents of src[] to dest[]  
+    for (uint32_t i=0; i<n; i++)  
+        cdest[i] = csrc[i];  
+}
 
+uint32_t clz(uint32_t i){
+    uint32_t j = 0, n = i;
+    while((n = n >> 1)) j++;
+    return j;
+}
 
+//shit function lol
+extern uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v){
+    uint32_t div = u;
+    while(div > v) div -= v;
+    return div;
+}
+
+extern uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
+    uint32_t q = 0, k = clz(u) - clz(v);
+    v = v << k;
+    k = 1 << k;
+    do {
+        if(v >= u) continue;
+        u -= v;
+        q += k;
+    }
+    while(v = v >> 1, (k = k >> 1));
+    return q;
+}
