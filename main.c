@@ -56,6 +56,7 @@ struct {
     int state_idle, state_rtd;
     volatile uint16_t torque_req;
     uint16_t lastAPPSFault;
+    uint8_t hasSeenBusActivity; //for the can watchdog
     struct{
         uint16_t apps1, apps2, torque, fault;
     } APPSCalib;
@@ -96,6 +97,7 @@ void Control();
 void InputIdle();
 void InputRTD();
 void send_Diagnostics();
+void CanReset();
 
 void APPS_RollingSmooth();
 int  APPS_calc(uint16_t*, uint16_t);
@@ -127,6 +129,7 @@ int main(){
     RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    RTOS_scheduleTask(car_state.state_idle, CanReset, 2500);
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
@@ -144,9 +147,7 @@ int main(){
    
     //non rt program bits
     for(;;){
-        //RTOS_ExecuteTasks();
-        GPIOB->ODR |= (rtos_scheduler.state == car_state.state_rtd) << 7;
-        GPIOB->ODR &= ~((rtos_scheduler.state != car_state.state_rtd) << 7);
+        RTOS_ExecuteTasks();
     }
 }
 
@@ -173,7 +174,13 @@ void InputIdle(){
 }
 
 void InputRTD(){
+    
+}
 
+void CanReset(){
+    if(!car_state.hasSeenBusActivity){
+        CAN_Init();
+    }
 }
 
 void send_Diagnostics(){
@@ -410,12 +417,14 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
 void recieve_CAN(){
     while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
         uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
-        uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
+        uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR 
+            + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
         uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
         CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
 
         CAN_msg canrx = {can_id, can_len, can_data};
         process_CAN(canrx);
+        car_state.hasSeenBusActivity = 1;
     }
 }
 

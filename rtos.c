@@ -110,7 +110,7 @@ extern int RTOS_removeFirstEvent(){
  */
 extern int RTOS_Update(){
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
-        if(!(rtos_scheduler.states[rtos_scheduler.state].taskMask >> i)) 
+        if(!((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 1)) 
             continue;
         if(rtos_scheduler.tasks[i].counter <= 0){
             rtos_scheduler.taskQue |= 1 << i;
