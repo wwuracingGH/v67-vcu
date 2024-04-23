@@ -169,12 +169,12 @@ int main(){
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
     
     for(int i = 0; i < 8; i++){
-        send_CAN(0xD0 + i, 1, &tasks[i]);
+        send_CAN(0xD0, 8, &tasks[0]);
     }
 
     uint8_t stmsks[2] = {rtos_scheduler.states[car_state.state_idle].taskMask,
         rtos_scheduler.states[car_state.state_rtd].taskMask}; 
-    send_CAN(0xD8, 2, stmsks);
+    send_CAN(0xD1, 2, stmsks);
 
     for(int i = 100; i > 0; i--){}
 
