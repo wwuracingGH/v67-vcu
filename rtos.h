@@ -41,6 +41,11 @@ typedef struct {
 extern kernel rtos_scheduler;
 
 /**
+ *  Inits and zeros the RTOS, just in case
+ */
+int RTOS_init(void);
+
+/**
  *  Adds a state to the car, and then returns the index of the state
  */
 int RTOS_addState(void (*start), void (*stop));
@@ -50,12 +55,15 @@ int RTOS_addState(void (*start), void (*stop));
  */
 int RTOS_switchState(uint8_t state);
 
+/**
+ * Checks if you are in that state
+ */
 int RTOS_inState(uint8_t state);
 
 /**
  * removes the first event in the queue
  */
-int RTOS_removeFirstEvent();
+int RTOS_removeFirstEvent(void);
 
 /**
  * schedules an event to take place in the future
@@ -70,11 +78,11 @@ int RTOS_scheduleTask(uint8_t state, void (*function)(), uint16_t period);
 /**
  * In interrupt, calls events and queues tasks
  */
-int RTOS_Update();
+int RTOS_Update(void);
 
 /**
  * In non-rt context, calls tasks that have been queued
  */
-int RTOS_ExecuteTasks();
+int RTOS_ExecuteTasks(void);
 
 #endif

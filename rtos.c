@@ -1,11 +1,10 @@
 #include "rtos.h"
 
-
 /**
  * adds state to the rtos
  */
 extern int RTOS_addState(void (*start), void (*stop)){
-    if (rtos_scheduler.numberOfStates > RTOS_maxStateNum) return -1;
+    if (rtos_scheduler.numberOfStates >= RTOS_maxStateNum) return -1;
 
     rtos_scheduler.states[rtos_scheduler.numberOfStates].entry = start;
     rtos_scheduler.states[rtos_scheduler.numberOfStates].exit = stop;
@@ -26,8 +25,9 @@ extern int RTOS_switchState(uint8_t state){
         rtos_scheduler.states[rtos_scheduler.state].exit();
 
     if(rtos_scheduler.states[state].entry != 0)
-        rtos_scheduler.states[rtos_scheduler.state].entry();
+        rtos_scheduler.states[state].entry();
 
+    rtos_scheduler.state = state;
     return state;
 }
 
@@ -52,7 +52,7 @@ extern int RTOS_scheduleTask(uint8_t state, void (*function)(), uint16_t period)
     rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].callback = function;
     rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].counter = 0;
     rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].reset_ms = period;
-    rtos_scheduler.states[state].taskMask ^= 1 << rtos_scheduler.numberOfTasks;
+    rtos_scheduler.states[state].taskMask |= 1 << rtos_scheduler.numberOfTasks;
 
     rtos_scheduler.numberOfTasks++;
     return rtos_scheduler.numberOfTasks - 1;

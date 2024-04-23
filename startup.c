@@ -139,7 +139,7 @@ void default_handler(void)
     while(1);
 }
 
-extern void* memset(void* b, uint32_t c, uint32_t len)
+extern void* memset(void* b, int c, unsigned int len)
 {
     uint8_t *p = b;
     while(len > 0)
@@ -151,7 +151,7 @@ extern void* memset(void* b, uint32_t c, uint32_t len)
     return(b);
 }
 
-extern void memcpy(void *dest, void *src, uint32_t n)  
+extern void * memcpy(void *dest, const void *src, unsigned int n)  
 {    
     uint8_t *csrc = (uint8_t *)src;  
     uint8_t *cdest = (uint8_t *)dest;  
@@ -159,6 +159,8 @@ extern void memcpy(void *dest, void *src, uint32_t n)
     // Copy contents of src[] to dest[]  
     for (uint32_t i=0; i<n; i++)  
         cdest[i] = csrc[i];  
+    
+    return (dest);
 }
 
 uint32_t clz(uint32_t i){

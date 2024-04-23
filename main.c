@@ -11,33 +11,58 @@
 #include "vendor/qfplib/qfplib.h"
 #include "rtos.h"
 
+/*
+ * ADC PARAMETERS 
+ */
 #define ROLLING_ADC_FR_POW 5
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW) 
 #define ROLLING_ADC_VALS  (ROLLING_ADC_FRAMES * 4)
 
-#define MIN_TORQUE_REQ      0 //do not change this. car not legally allowed to go backwards.
+/*
+ * APPS CALC PARAMETERS
+ */
+#define MIN_TORQUE_REQ      0
+#define MIN_REGEN_REQ       0   /* not real */
 #define MAX_TORQUE_REQ      100
+#define BRAKES_THREASHOLD   500 /* change this in the future */
 
-#define BRAKES_THREASHOLD   500 //change this in the future
+/*
+ * EXTRA BEHAVIOR - 0 or 1
+ */
+#define CANWATCHDOG         0
+#define TRACTIONCONTROL     0 /* does nothing rn */
+#define REGENBRAKING        0 /* does nothing rn */
 
-#define CONSTINV(n)             (1.0f / (float)(n)) //TODO: change all of the devisors to precomputed const values
+/*
+ * FLOAT HELPER FUNCTIONS
+ */
+#define CONSTINV(n)             (1.0f / (float)(n))
 #define REMAP0_1(n, min, max)   ((float)(n - min) * CONSTINV(max - min))
 #define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
 #define FABS(x)                 ((x) > 0.0f ? (x) : -(x))
 
+/*
+ * APPS VALUES
+ */
 const uint32_t APPS1_MIN    = 1500;
 const uint32_t APPS1_MAX    = 3700;
 const uint32_t APPS2_MIN    = 400;
 const uint32_t APPS2_MAX    = 2550;
 
-//these values enable apps min and max to both be slightly inside pedal travel to produce a sort of "deadzone" effect.
+/*
+ * APPS DEADZONE
+ */
 const float SENSOR_MIN = -0.10f;
 const float SENSOR_MAX =  1.10f;
 
-const uint16_t controlPeriod = 5,  //how many milliseconds between control loop
-               inputPeriod = 50,   //how many milliseconds between input parses
-               recievePeriod = 20, //how many milliseconds between can processes
-               diagPeriod = 100;   //how many milliseconds between diagnostic can sends
+/* 
+ * RTOS FUNCTION PERIODS - in MS
+ */
+const uint16_t controlPeriod = 5,
+               inputPeriod = 50,
+               recievePeriod = 20,
+               diagPeriod = 100,
+               canWDPeriod = 2500;
 
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
@@ -52,7 +77,7 @@ struct {
     int state_idle, state_rtd;
     volatile uint16_t torque_req;
     uint16_t lastAPPSFault;
-    uint8_t hasSeenBusActivity; //for the can watchdog
+    uint8_t hasSeenBusActivity; /* Can watchdog */
     struct{
         uint16_t apps1, apps2, torque, fault;
     } APPSCalib;
@@ -102,20 +127,19 @@ void process_CAN(CAN_msg);
 void recieve_CAN();
 void RTD_start();
 
-//what gets sent to the motor controller
+/* global stuff */
 MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
-
-kernel rtos_scheduler = {0, {0}, 0, 0, {0}, 0, 0, 0}; 
+kernel rtos_scheduler = {0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}}; 
 
 int main(){
-    //setup
+    /* setup */
     clock_init();
 
     for(int i = 0; i < ROLLING_ADC_VALS; i++){
         ADC_RollingValues[i] = 0;
     }
 
-    GPIO_Init(); //must be called first
+    GPIO_Init(); /* must be called first */
 
     car_state.state_idle = RTOS_addState(0, 0);
     car_state.state_rtd  = RTOS_addState(RTD_start, 0);
@@ -125,7 +149,9 @@ int main(){
     RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
-    //RTOS_scheduleTask(car_state.state_idle, CanReset, 2500);
+#if CANWATCHDOG == 1
+    RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
+#endif
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
@@ -138,16 +164,16 @@ int main(){
     MC_ParameterCommand shutup = { 0b0000000000000010, 0b0001110011100111, 0, 1, 148};
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
     
-    SysTick_Config(48000); // 48MHZ / 48000 = 1 tick every ms
-    __enable_irq(); //enable interrupts
+    SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
+    __enable_irq(); /* enable interrupts */
    
-    //non rt program bits
+    /* non rt program bits */
     for(;;){
         RTOS_ExecuteTasks();
     }
 }
 
-//runs every 1 ms
+/* runs every 1 ms */
 void systick_handler()
 {   
     RTOS_Update();
@@ -155,7 +181,7 @@ void systick_handler()
 
 void Control() {
     APPS_RollingSmooth();
-    car_state.lastAPPSFault = APPS_calc(&car_state.torque_req, car_state.lastAPPSFault);
+    car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
     canmsg.torqueCommand = car_state.torque_req;
     send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
@@ -183,7 +209,7 @@ void send_Diagnostics(){
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
 
-    //yikes, variable declaration. get rid of this!!!
+    /* TODO: this but better */
     uint8_t statemsg[2] = {
         RTOS_inState(car_state.state_idle),
         RTOS_inState(car_state.state_rtd)
@@ -192,29 +218,29 @@ void send_Diagnostics(){
 }
 
 void __turn_that_buzzer_the_fuck_off(){
-    GPIOB->ODR &= ~GPIO_ODR_5; //turns that buzzer the fuck off 
+    GPIOB->ODR &= ~GPIO_ODR_5; /* turns that buzzer the fuck off */ 
 }
 
 void RTD_start(){
-    GPIOB->ODR |= GPIO_ODR_5; //buzzer
+    GPIOB->ODR |= GPIO_ODR_5; /* buzzer */
     canmsg.inverterEnable = 1;
     RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 3000);
 }
 
-void clock_init() //turns on hsi48 and sets as system clock
+void clock_init() /* turns on hsi48 and sets as system clock */
 {
-    //wait one clock cycle before accessing flash memory @48MHZ
+    /* wait one clock cycle before accessing flash memory @48MHZ */
     FLASH->ACR |= 0b001 << FLASH_ACR_LATENCY_Pos;
 
-    // Enables HSI48 oscillator
+    /* Enables HSI48 oscillator */
     RCC->CR2  |= RCC_CR2_HSI48ON;
     while (!(RCC->CR2 & RCC_CR2_HSI48RDY));
     
-    // no peripheral prescaler div or hsi prescaler div
+    /* no peripheral prescaler div or hsi prescaler div */
     RCC->CFGR &= ~(0b111 << RCC_CFGR_PPRE_Pos);
     RCC->CFGR &= ~(0b1111 << RCC_CFGR_HPRE_Pos);
 
-    // sets system clock as HSI48 oscillator
+    /* sets system clock as HSI48 oscillator */
     RCC->CFGR |= 0b11 << RCC_CFGR_SW_Pos;
     while (!(RCC->CFGR & (0b11 << RCC_CFGR_SWS_Pos)));
 }
@@ -222,16 +248,17 @@ void clock_init() //turns on hsi48 and sets as system clock
 void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
-    ADC1->CFGR1 &= ~(uint32_t)0b011000; // set 12 bit precision
+    ADC1->CFGR1 &= ~(uint32_t)0b011000; /* set 12 bit precision */
     
-    ADC1->CFGR1 |= ADC_CFGR1_CONT; //analog to digital converter to cont mode
-    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; //align bits to the right
+    ADC1->CFGR1 |= ADC_CFGR1_CONT; /* analog to digital converter to cont mode */
+    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; /* align bits to the right */
 
-    ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; //enable dma & make cont
+    ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; /* enable dma & make cont */
 
     ADC1->SMPR |= 0b111;
 
-    ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; //channels to scan
+    ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5 
+                 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; /*channels to scan */
 
     RCC->CR2 |= RCC_CR2_HSI14ON;
     while ((RCC->CR2 & RCC_CR2_HSI14RDY) == 0);
@@ -244,17 +271,17 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 
     RCC->AHBENR |= RCC_AHBENR_DMAEN;
 
-    DMA1_Channel1->CCR &= ~DMA_CCR_MEM2MEM; //peripheral to memory
-    DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC | DMA_CCR_TEIE; //c
-    DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0 | DMA_CCR_PSIZE_0; //set size of data to transfer
+    DMA1_Channel1->CCR &= ~DMA_CCR_MEM2MEM; /* peripheral to memory */
+    DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC | DMA_CCR_TEIE; /* c */
+    DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0 | DMA_CCR_PSIZE_0; /* set size of data to transfer */
     
-    DMA1_Channel1->CPAR = (uint32_t)(&(ADC1->DR)); //sets source of dma transfer
-    DMA1_Channel1->CMAR = (uint32_t)dest; //sets destination of dma transfer
-    DMA1_Channel1->CNDTR = size; //sets size of dma transfer
+    DMA1_Channel1->CPAR = (uint32_t)(&(ADC1->DR)); /* sets source of dma transfer */
+    DMA1_Channel1->CMAR = (uint32_t)dest; /* sets destination of dma transfer */
+    DMA1_Channel1->CNDTR = size; /* sets size of dma transfer */
     
-    DMA1_Channel1->CCR |= DMA_CCR_EN; //enables dma
+    DMA1_Channel1->CCR |= DMA_CCR_EN; /* enables dma */
 
-	ADC1->CR |= ADC_CR_ADSTART; //starts adc
+	ADC1->CR |= ADC_CR_ADSTART; /* starts adc */
 
     NVIC_EnableIRQ(DMA1_Channel1_IRQn); /* (1) */
     NVIC_SetPriority(DMA1_Channel1_IRQn,0); /* (2) */
@@ -276,43 +303,43 @@ void CAN_Init (){
 
     CAN->FMR |= CAN_FMR_FINIT;
     CAN->FA1R |= CAN_FA1R_FACT0;
-    CAN->sFilterRegister[0].FR1 = 0; // Its like a filter, but doesn't filter anything!
+    CAN->sFilterRegister[0].FR1 = 0; /* Its like a filter, but doesn't filter anything! */
     CAN->sFilterRegister[0].FR2 = 0;
     CAN->FMR &=~ CAN_FMR_FINIT;
     CAN->IER |= CAN_IER_FMPIE0;
 }
     
 void GPIO_Init(){
-    //turn on gpio clocks
+    /* turn on gpio clocks */
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
 
-    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   // PORTA_GPIO
-                 |  (MODE_ANALOG    << GPIO_MODER_MODER1_Pos)   // APPS2
-                 |  (MODE_INPUT     << GPIO_MODER_MODER3_Pos)   // PORTA_GPIO
-                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   // PORTA_GPIO
-                 |  (MODE_ANALOG    << GPIO_MODER_MODER5_Pos)   // RBPS
-                 |  (MODE_ANALOG    << GPIO_MODER_MODER6_Pos)   // FBPS
-                 |  (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos)   // RTD_LIGHT
-                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER11_Pos)  // CAN TX
-                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER12_Pos); // CAN RX
+    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   /* PORTA_GPIO   */
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER1_Pos)   /* APPS2        */
+                 |  (MODE_INPUT     << GPIO_MODER_MODER3_Pos)   /* PORTA_GPIO   */
+                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   /* PORTA_GPIO   */
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER5_Pos)   /* RBPS         */
+                 |  (MODE_ANALOG    << GPIO_MODER_MODER6_Pos)   /* FBPS         */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos)   /* RTD_LIGHT    */
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER11_Pos)  /* CAN TX       */
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODER12_Pos); /* CAN RX       */
 
-    // no pull up - pull down
+    /* no pull up - pull down */
     GPIOA->PUPDR  = 0 | (0b10 << GPIO_PUPDR_PUPDR1_Pos);
     GPIOB->PUPDR  = 0;
-    GPIOA->AFR[1] = (4 << GPIO_AFRH_AFSEL11_Pos) | (4 << GPIO_AFRH_AFSEL12_Pos); //set up can
+    GPIOA->AFR[1] = (4 << GPIO_AFRH_AFSEL11_Pos) | (4 << GPIO_AFRH_AFSEL12_Pos); /* can AFR */
 
-    GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   // APPS1
-                 |  (MODE_INPUT     << GPIO_MODER_MODER1_Pos)   // RTD_BUTTON
-                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   // PORTB_GPIO
-                 |  (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos)   // BUZZER
-                 |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   // LED1
-                 |  (MODE_INPUT     << GPIO_MODER_MODER7_Pos);  // PORTB_GPIO
+    GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   /* APPS1        */
+                 |  (MODE_INPUT     << GPIO_MODER_MODER1_Pos)   /* RTD_BUTTON   */
+                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   /* PORTB_GPIO   */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos)   /* BUZZER       */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   /* LED1         */
+                 |  (MODE_INPUT     << GPIO_MODER_MODER7_Pos);  /* PORTB_GPIO   */
     
-    GPIOB->PUPDR |= 0b01 << GPIO_PUPDR_PUPDR1_Pos; //button is pulled up
+    GPIOB->PUPDR |= 0b01 << GPIO_PUPDR_PUPDR1_Pos; /* button is pulled up */
 }
 
-//very fast average
+/* very fast average */
 void APPS_RollingSmooth(){
     uint32_t APPS2 = 0,
              RBPS  = 0,
@@ -331,8 +358,8 @@ void APPS_RollingSmooth(){
     ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
-
 int GetTCMax(float coeff_friction){
+#if TRACTIONCONTROL == 1
     const float mass_KG = 240;
     const float rearAxel_Moment = 0.78f;
     const float gravity = 9.81f;
@@ -340,7 +367,7 @@ int GetTCMax(float coeff_friction){
     const float wheelbase = 1.54f;
     const float wheelbasediv = 1.0f/wheelbase;
 
-    const float ellipseOblongConst = 1.2f; //reciprocal of how weak the side friction is compared to the long friction
+    const float ellipseOblongConst = 1.2f; /*reciprocal of how weak the side friction is compared to the long friction */
 
     float rearAxel_downforce = ((2 * (wheelbase - rearAxel_Moment) * gravity) 
         + (cg_height * car_state.acceleration.ca.carAccel_X)) 
@@ -350,8 +377,10 @@ int GetTCMax(float coeff_friction){
         * car_state.acceleration.ca.carAccel_Y;
 
     float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
-    
-    
+
+#else
+    return MAX_TORQUE_REQ; 
+#endif
 }
 
 //returns 1 if there's an issue
@@ -375,7 +404,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 
     float c_app = (apps1 + apps2) * 0.5f;
 
-    if      (lastFault == 3 && c_app > 0.05f) //if there was APPS/BrakePlausability and apps is still > 5%
+    if      (lastFault == 3 && c_app > 0.05f)
         fault = 3;
     else if (fault == 1)
                  ;
@@ -384,20 +413,24 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
         fault = 3;
     else if (RTOS_inState(car_state.state_idle));
-    else //if there are no faults
+    else /*if there are no faults */
         t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
  
     car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
     car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
-    
+
+#if REGENBRAKING == 1
+    /* TODO: REGEN? */
+#endif
+
     *torque = t_req;
     return fault;
 }
 
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
-    //find first empty mailbox
+    /* find first empty mailbox */
     int j = (CAN->TSR & CAN_TSR_CODE_Msk) >> CAN_TSR_CODE_Pos;
 
     CAN->sTxMailBox[j].TDTR = length;
@@ -416,7 +449,7 @@ void recieve_CAN(){
         uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR 
             + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
         uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
-        CAN->RF0R |= CAN_RF0R_RFOM0; //release mailbox
+        CAN->RF0R |= CAN_RF0R_RFOM0; /* release mailbox */
 
         CAN_msg canrx = {can_id, can_len, can_data};
         process_CAN(canrx);
