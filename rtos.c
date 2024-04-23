@@ -25,7 +25,7 @@ extern int RTOS_switchState(uint8_t state){
     if(rtos_scheduler.states[rtos_scheduler.state].exit != 0) 
         rtos_scheduler.states[rtos_scheduler.state].exit();
 
-    if(rtos_scheduler.states[rtos_scheduler.state].entry != 0)
+    if(rtos_scheduler.states[state].entry != 0)
         rtos_scheduler.states[rtos_scheduler.state].entry();
 
     return state;

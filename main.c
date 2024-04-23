@@ -29,10 +29,6 @@ const uint32_t APPS1_MIN    = 1500;
 const uint32_t APPS1_MAX    = 3700;
 const uint32_t APPS2_MIN    = 400;
 const uint32_t APPS2_MAX    = 2550;
-const uint32_t FBPS_MIN     = 0;
-const uint32_t FBPS_MAX     = 4092;
-const uint32_t RBPS_MIN     = 0;
-const uint32_t RBPS_MAX     = 4092;
 
 //these values enable apps min and max to both be slightly inside pedal travel to produce a sort of "deadzone" effect.
 const float SENSOR_MIN = -0.10f;
@@ -129,7 +125,7 @@ int main(){
     RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
-    RTOS_scheduleTask(car_state.state_idle, CanReset, 2500);
+    //RTOS_scheduleTask(car_state.state_idle, CanReset, 2500);
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
@@ -214,7 +210,7 @@ void clock_init() //turns on hsi48 and sets as system clock
     RCC->CR2  |= RCC_CR2_HSI48ON;
     while (!(RCC->CR2 & RCC_CR2_HSI48RDY));
     
-    //no peripheral prescaler div or hsi prescaler div
+    // no peripheral prescaler div or hsi prescaler div
     RCC->CFGR &= ~(0b111 << RCC_CFGR_PPRE_Pos);
     RCC->CFGR &= ~(0b1111 << RCC_CFGR_HPRE_Pos);
 
@@ -252,7 +248,7 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC | DMA_CCR_TEIE; //c
     DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0 | DMA_CCR_PSIZE_0; //set size of data to transfer
     
-    DMA1_Channel1->CPAR = (uint32_t) (&(ADC1->DR)); //sets source of dma transfer
+    DMA1_Channel1->CPAR = (uint32_t)(&(ADC1->DR)); //sets source of dma transfer
     DMA1_Channel1->CMAR = (uint32_t)dest; //sets destination of dma transfer
     DMA1_Channel1->CNDTR = size; //sets size of dma transfer
     
