@@ -148,7 +148,7 @@ int main(){
 
     RTOS_switchState(car_state.state_idle);
 
-    uint8_t tasks[8] = 0;
+    uint8_t tasks[8] = {0};
 
     tasks[0] = RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
     tasks[1] = RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
@@ -169,13 +169,15 @@ int main(){
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
     
     for(int i = 0; i < 8; i++){
-        send_CAN(0xD + i, 1, &tasks[i]);
+        send_CAN(0xD0 + i, 1, &tasks[i]);
     }
 
     uint8_t stmsks[2] = {rtos_scheduler.states[car_state.state_idle].taskMask,
-        rtos_scheduler.states[car_state.state_rtd].taskMask};
-    
+        rtos_scheduler.states[car_state.state_rtd].taskMask}; 
     send_CAN(0xD8, 2, stmsks);
+
+    for(int i = 100; i > 0; i--){}
+
     SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
     __enable_irq(); /* enable interrupts */
    
