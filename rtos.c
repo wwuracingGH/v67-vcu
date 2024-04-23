@@ -38,7 +38,7 @@ extern int RTOS_inState(uint8_t state) { return state == rtos_scheduler.state; }
  * returns the index of the task
  */
 extern int RTOS_scheduleTask(uint8_t state, void (*function)(), uint16_t period){
-    if(rtos_scheduler.numberOfTasks == RTOS_maxStateNum) return -1;
+    if(rtos_scheduler.numberOfTasks == RTOS_maxTaskNum) return -1;
 
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
         if (rtos_scheduler.tasks[i].callback == function &&
@@ -110,11 +110,11 @@ extern int RTOS_removeFirstEvent(){
  */
 extern int RTOS_Update(){
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
-        if(!((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 1)) 
-            continue;
-        if(rtos_scheduler.tasks[i].counter <= 0){
-            rtos_scheduler.taskQue |= 1 << i;
-            rtos_scheduler.tasks[i].counter = rtos_scheduler.tasks[i].reset_ms;
+        if((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 1) {
+            if(rtos_scheduler.tasks[i].counter <= 0){
+                rtos_scheduler.taskQue |= 1 << i;
+                rtos_scheduler.tasks[i].counter = rtos_scheduler.tasks[i].reset_ms;
+            }
         }
         rtos_scheduler.tasks[i].counter--;
     }
@@ -143,14 +143,14 @@ extern int RTOS_Update(){
  */
 extern int RTOS_ExecuteTasks(){
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
-        if (rtos_scheduler.taskQue >> i & 0x1){
+        if ((rtos_scheduler.taskQue >> i) & 0x1){
             rtos_scheduler.tasks[i].callback();
             rtos_scheduler.taskQue &= ~(0x1 << i);
         }
     }
 
     for(int i = 0; i != -1;){
-        if (rtos_scheduler.eventQue >> i & 0x1){
+        if ((rtos_scheduler.eventQue) >> i & 0x1){
             rtos_scheduler.tasks[i].callback();
             i = rtos_scheduler.eventHeap[i].nextEvent;
             RTOS_removeFirstEvent();

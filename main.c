@@ -1,6 +1,8 @@
-//nicole swierstra - vcu code
-//as of right now this is just a prototype there's a lot of debugging I'm gonna need to do
-//and a lot of comments i'm going to need to remove when I have the documentation working lol
+/**
+ * NICOLE SWIERSTRA
+ * 
+ * VIKING 66 VCU CODE
+ */
 
 #include <stdint.h>
 #ifndef STM32F042x6
@@ -146,17 +148,19 @@ int main(){
 
     RTOS_switchState(car_state.state_idle);
 
-    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
-    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
-    RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    uint8_t tasks[8] = 0;
+
+    tasks[0] = RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
+    tasks[1] = RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
+    tasks[2] = RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
 #if CANWATCHDOG == 1
-    RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
+    tasks[3] = RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
 #endif
     
-    RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
-    RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
-    RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
-    RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
+    tasks[4] = RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
+    tasks[5] = RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
+    tasks[6] = RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
+    tasks[7] = RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
@@ -164,6 +168,14 @@ int main(){
     MC_ParameterCommand shutup = { 0b0000000000000010, 0b0001110011100111, 0, 1, 148};
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
     
+    for(int i = 0; i < 8; i++){
+        send_CAN(0xD + i, 1, &tasks[i]);
+    }
+
+    uint8_t stmsks[2] = {rtos_scheduler.states[car_state.state_idle].taskMask,
+        rtos_scheduler.states[car_state.state_rtd].taskMask};
+    
+    send_CAN(0xD8, 2, stmsks);
     SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
     __enable_irq(); /* enable interrupts */
    
