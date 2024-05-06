@@ -1,5 +1,36 @@
 #include "rtos.h"
 
+
+extern int RTOS_init(){
+    rtos_scheduler.firstEventIndex = -1;
+    rtos_scheduler.numberOfStates = 0;
+    rtos_scheduler.numberOfTasks = 0;
+    rtos_scheduler.taskQue = 0;
+    rtos_scheduler.eventQue = 0;
+    rtos_scheduler.state = 0;
+    
+
+    for(int i = 0; i < RTOS_maxEventNum; i++){
+        rtos_scheduler.eventHeap[i].nextEvent = -1;
+        rtos_scheduler.eventHeap[i].callback = 0;
+        rtos_scheduler.eventHeap[i].countdown = 0;
+    }
+
+    for(int i = 0; i < RTOS_maxStateNum; i++){
+        rtos_scheduler.states[i].entry = 0;
+        rtos_scheduler.states[i].exit = 0;
+        rtos_scheduler.states[i].taskMask = 0;
+    }
+
+    for (int i = 0; i < RTOS_maxTaskNum; i++){
+        rtos_scheduler.tasks[i].callback = 0;
+        rtos_scheduler.tasks[i].counter = 0;
+        rtos_scheduler.tasks[i].reset_ms = 0;
+    }
+
+    return 0;
+}
+
 /**
  * adds state to the rtos
  */
@@ -50,7 +81,7 @@ extern int RTOS_scheduleTask(uint8_t state, void (*function)(), uint16_t period)
     }
 
     rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].callback = function;
-    rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].counter = 0;
+    rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].counter = period;
     rtos_scheduler.tasks[rtos_scheduler.numberOfTasks].reset_ms = period;
     rtos_scheduler.states[state].taskMask |= 1 << rtos_scheduler.numberOfTasks;
 
@@ -109,14 +140,15 @@ extern int RTOS_removeFirstEvent(){
  * called in ms interrupt context to schedule the tasks and execute the events
  */
 extern int RTOS_Update(){
-    for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
-        if((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 1) {
+    for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){ 
+        rtos_scheduler.tasks[i].counter--;
+
+        if((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 0x01) {
             if(rtos_scheduler.tasks[i].counter <= 0){
                 rtos_scheduler.taskQue |= 1 << i;
                 rtos_scheduler.tasks[i].counter = rtos_scheduler.tasks[i].reset_ms;
             }
         }
-        rtos_scheduler.tasks[i].counter--;
     }
 
     int eventpointer = rtos_scheduler.firstEventIndex;

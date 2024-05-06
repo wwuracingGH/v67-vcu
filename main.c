@@ -143,6 +143,8 @@ int main(){
 
     GPIO_Init(); /* must be called first */
 
+    RTOS_init();
+
     car_state.state_idle = RTOS_addState(0, 0);
     car_state.state_rtd  = RTOS_addState(RTD_start, 0);
 
@@ -167,20 +169,14 @@ int main(){
     //                               |   |   |   |       |   |   |   |
     MC_ParameterCommand shutup = { 0b0000000000000010, 0b0001110011100111, 0, 1, 148};
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
-    
-    for(int i = 0; i < 8; i++){
-        send_CAN(0xD0, 8, &tasks[0]);
-    }
 
-    uint8_t stmsks[2] = {rtos_scheduler.states[car_state.state_idle].taskMask,
-        rtos_scheduler.states[car_state.state_rtd].taskMask}; 
-    send_CAN(0xD1, 2, stmsks);
+    //GPIOB->ODR ^= 1 << 3;
 
-    for(int i = 100; i > 0; i--){}
+    send_CAN(0xD0, 8, &tasks[0]);
 
     SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
     __enable_irq(); /* enable interrupts */
-   
+
     /* non rt program bits */
     for(;;){
         RTOS_ExecuteTasks();
@@ -189,7 +185,7 @@ int main(){
 
 /* runs every 1 ms */
 void systick_handler()
-{   
+{  
     RTOS_Update();
 }
 
@@ -198,19 +194,24 @@ void Control() {
     car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
     canmsg.torqueCommand = car_state.torque_req;
-    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);    
 }
 
 void InputIdle(){
     if(!(GPIOB->IDR & GPIO_IDR_1) && 
-            ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN)))
+        ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN)))
     {
         RTOS_switchState(car_state.state_rtd);
     }
 }
 
 void InputRTD(){
-    
+    if(!(GPIOB->IDR & GPIO_IDR_1) && 
+        ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))){
+        canmsg.inverterEnable = 0;
+        send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);/* disables lockout */
+        canmsg.inverterEnable = 1;
+    }
 }
 
 void CanReset(){
@@ -219,7 +220,9 @@ void CanReset(){
     }
 }
 
-void send_Diagnostics(){
+void send_Diagnostics(){ 
+    GPIOB->ODR ^= 1 << 3;
+
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
 
@@ -345,6 +348,7 @@ void GPIO_Init(){
 
     GPIOB->MODER |= (MODE_ANALOG    << GPIO_MODER_MODER0_Pos)   /* APPS1        */
                  |  (MODE_INPUT     << GPIO_MODER_MODER1_Pos)   /* RTD_BUTTON   */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER3_Pos)   /* Nucleo user LED */
                  |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   /* PORTB_GPIO   */
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER5_Pos)   /* BUZZER       */
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER6_Pos)   /* LED1         */
