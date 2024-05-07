@@ -31,7 +31,8 @@
 /*
  * EXTRA BEHAVIOR - 0 or 1
  */
-#define CANWATCHDOG         0
+#define CANWATCHDOG         0 
+#define MCWATCHDOG          0 /* resets the motor controller if there are any faults and leaves RTD */
 #define TRACTIONCONTROL     0 /* does nothing rn */
 #define REGENBRAKING        0 /* does nothing rn */
 
@@ -50,6 +51,8 @@ const uint32_t APPS1_MIN    = 1500;
 const uint32_t APPS1_MAX    = 3700;
 const uint32_t APPS2_MIN    = 400;
 const uint32_t APPS2_MAX    = 2550;
+
+const uint8_t MCResetMaxAttempts = 5; //number of times it will try to reset the motor controller
 
 /*
  * APPS DEADZONE
@@ -79,7 +82,10 @@ struct {
     int state_idle, state_rtd;
     volatile uint16_t torque_req;
     uint16_t lastAPPSFault;
+#if CANWATCHDOG == 1
     uint8_t hasSeenBusActivity; /* Can watchdog */
+#endif
+    uint8_t MCResetAttempts; /* number of resets until it stops */
     struct{
         uint16_t apps1, apps2, torque, fault;
     } APPSCalib;
@@ -87,6 +93,10 @@ struct {
         MC_HighSpeed hs;
         uint64_t bits;
     } hsmessage;
+    union {
+        MC_FaultCodes fc;
+        uint64_t bits;
+    } faults;
     union {
         DL_WheelSpeed ws;
         uint64_t bits;
@@ -121,6 +131,7 @@ void InputIdle();
 void InputRTD();
 void send_Diagnostics();
 void CanReset();
+void MCWatchdog();
 
 void APPS_RollingSmooth();
 int  APPS_calc(uint16_t*, uint16_t);
@@ -129,8 +140,12 @@ void process_CAN(CAN_msg);
 void recieve_CAN();
 void RTD_start();
 
+int areThereFaults();
+
 /* global stuff */
 MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
+MC_ParameterCommand resetMC = {20, 1, 0, 0, 0};
+
 kernel rtos_scheduler = {0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}}; 
 
 int main(){
@@ -150,29 +165,29 @@ int main(){
 
     RTOS_switchState(car_state.state_idle);
 
-    uint8_t tasks[8] = {0};
-
-    tasks[0] = RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
-    tasks[1] = RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
-    tasks[2] = RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
 #if CANWATCHDOG == 1
-    tasks[3] = RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
+    RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
+#endif
+
+#if MCWATCHDOG == 1
+    RTOS_scheduleTask(car_state.state_idle, MCWatchdog, 1000); //Every one second
+    RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, 1000); //Every one second
 #endif
     
-    tasks[4] = RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
-    tasks[5] = RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
-    tasks[6] = RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
-    tasks[7] = RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
+    RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
-    //                               |   |   |   |       |   |   |   |
-    MC_ParameterCommand shutup = { 0b0000000000000010, 0b0001110011100111, 0, 1, 148};
+    /*                                          |   |   |   |       |   |   |   |    */
+    MC_ParameterCommand shutup = { 0, 1, 148, 0b0001110011100111, 0b0000000000000010};
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
-
-    //GPIOB->ODR ^= 1 << 3;
-
-    send_CAN(0xD0, 8, &tasks[0]);
 
     SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
     __enable_irq(); /* enable interrupts */
@@ -194,31 +209,35 @@ void Control() {
     car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
     canmsg.torqueCommand = car_state.torque_req;
-    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);    
+    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&canmsg);    
 }
 
 void InputIdle(){
-    if(!(GPIOB->IDR & GPIO_IDR_1) && 
-        ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN)))
-    {
-        RTOS_switchState(car_state.state_rtd);
+    if(!(GPIOB->IDR & GPIO_IDR_1)){
+        if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
+            && !areThereFaults())
+        {
+            RTOS_switchState(car_state.state_rtd);
+        }
+        else if (areThereFaults()) {
+            MCWatchdog();
+        }
     }
 }
 
 void InputRTD(){
-    if(!(GPIOB->IDR & GPIO_IDR_1) && 
-        ((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))){
-        canmsg.inverterEnable = 0;
-        send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);/* disables lockout */
-        canmsg.inverterEnable = 1;
-    }
+
+
 }
 
+
+#if CANWATCHDOG == 1
 void CanReset(){
     if(!car_state.hasSeenBusActivity){
         CAN_Init();
     }
 }
+#endif
 
 void send_Diagnostics(){ 
     GPIOB->ODR ^= 1 << 3;
@@ -238,10 +257,31 @@ void __turn_that_buzzer_the_fuck_off(){
     GPIOB->ODR &= ~GPIO_ODR_5; /* turns that buzzer the fuck off */ 
 }
 
+int areThereFaults(){
+    if(car_state.faults.fc.runtimeErrors > 0) return 1;
+
+    else return 0;
+}
+
 void RTD_start(){
     GPIOB->ODR |= GPIO_ODR_5; /* buzzer */
     canmsg.inverterEnable = 1;
     RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 3000);
+}
+
+void MCWatchdog(){
+    if(areThereFaults()){
+        if(RTOS_inState(car_state.state_rtd)){
+            canmsg.inverterEnable = 0;
+            RTOS_switchState(car_state.state_idle);
+        }
+        
+        if(car_state.MCResetAttempts > 0){
+            send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
+        }
+
+        car_state.MCResetAttempts--;
+    } 
 }
 
 void clock_init() /* turns on hsi48 and sets as system clock */
@@ -471,7 +511,10 @@ void recieve_CAN(){
 
         CAN_msg canrx = {can_id, can_len, can_data};
         process_CAN(canrx);
+
+#if CANWATCHDOG == 1
         car_state.hasSeenBusActivity = 1;
+#endif
     }
 }
 
@@ -479,6 +522,15 @@ void process_CAN(CAN_msg cm){
     switch (cm.id){
         case MC_CANID_HIGHSPEEDMESSAGE:
             car_state.hsmessage.bits = cm.data;
-        break;
+            break;
+        case VCU_CANID_ACCEL:
+            car_state.acceleration.bits = cm.data;
+            break;
+        case VCU_CANID_WHEELSPEED:
+            car_state.wheelspeed.bits = cm.data;
+            break;
+        case MC_CANID_FAULTCODES:
+            car_state.faults.bits = cm.data;
+            break;
     }
 }

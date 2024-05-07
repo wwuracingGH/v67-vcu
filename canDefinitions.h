@@ -278,11 +278,11 @@ MC_CANSTRUCT {
 } MC_Command;
 
 MC_CANSTRUCT {
-    uint16_t High;
-    uint16_t Low;
-    uint8_t _RESERVED;
-    uint8_t  readWrite;
     uint16_t parameterAdress;
+    uint8_t  readWrite;
+    uint8_t _RESERVED;
+    uint16_t LowData;
+    uint16_t HighData;
 } MC_ParameterCommand;
 
 MC_CANSTRUCT {
