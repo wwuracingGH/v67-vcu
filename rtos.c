@@ -101,9 +101,11 @@ extern int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
     rtos_scheduler.eventHeap[pointer].countdown = countdown;
     
     int index = rtos_scheduler.firstEventIndex;
-    int lastIndex = -1;    
-    int firstevent = 1;
+    int lastIndex = -1;
+    int firstevent = -1;
+
     while(rtos_scheduler.eventHeap[index].nextEvent != -1){
+        if(index == -1) break;
         if(rtos_scheduler.eventHeap[index].countdown > countdown) break;
 
         firstevent = 0;
@@ -116,7 +118,7 @@ extern int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
     }
     else rtos_scheduler.firstEventIndex = pointer;
 
-    if(rtos_scheduler.eventHeap[lastIndex].nextEvent != -1)
+    if(index != -1)
         rtos_scheduler.eventHeap[pointer].nextEvent = index;
 
     return pointer;

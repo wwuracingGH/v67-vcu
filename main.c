@@ -25,6 +25,7 @@
  */
 #define MIN_TORQUE_REQ      0
 #define MIN_REGEN_REQ       0   /* not real */
+#define MIN_REGEN_SPEED     0
 #define MAX_TORQUE_REQ      100
 #define BRAKES_THREASHOLD   500 /* change this in the future */
 
@@ -37,22 +38,48 @@
 #define REGENBRAKING        0 /* does nothing rn */
 
 /*
- * FLOAT HELPER FUNCTIONS
+ * HELPER FUNCTIONS
  */
 #define CONSTINV(n)             (1.0f / (float)(n))
 #define REMAP0_1(n, min, max)   ((float)(n - min) * CONSTINV(max - min))
 #define REMAPm_M(n, min, max)   ((n) * (max - min) + (min))
 #define FABS(x)                 ((x) > 0.0f ? (x) : -(x))
 
+/**
+ * I HAVE NO IDEA HOW THE MOSFET WORKS
+ */
+
+#define BUZZERON()              GPIOB->ODR |= GPIO_ODR_5
+#define BUZZEROFF()             GPIOB->ODR &= ~GPIO_ODR_5
+
 /*
  * APPS VALUES
  */
-const uint32_t APPS1_MIN    = 1500;
-const uint32_t APPS1_MAX    = 3700;
-const uint32_t APPS2_MIN    = 400;
-const uint32_t APPS2_MAX    = 2550;
 
-const uint8_t MCResetMaxAttempts = 5; //number of times it will try to reset the motor controller
+#define COMPILED_APPS1_MIN 1500
+#define COMPILED_APPS2_MIN 400
+#define COMPILED_APPS1_MAX 3700
+#define COMPILED_APPS2_MAX 2550
+
+struct {
+    uint32_t APPS1_MIN;
+    uint32_t APPS1_MAX;
+    uint32_t APPS2_MIN;
+    uint32_t APPS2_MAX;
+} appsCalibrationValues __attribute__((section(".usrdat"))) = 
+    {
+        COMPILED_APPS1_MIN, 
+        COMPILED_APPS1_MAX, 
+        COMPILED_APPS2_MIN, 
+        COMPILED_APPS2_MAX
+    };
+
+
+#define APPS1_MIN appsCalibrationValues.APPS1_MIN
+#define APPS1_MAX appsCalibrationValues.APPS1_MAX
+#define APPS2_MIN appsCalibrationValues.APPS2_MIN
+#define APPS2_MAX appsCalibrationValues.APPS2_MAX
+
 
 /*
  * APPS DEADZONE
@@ -68,6 +95,11 @@ const uint16_t controlPeriod = 5,
                recievePeriod = 20,
                diagPeriod = 100,
                canWDPeriod = 2500;
+
+/* 
+ * helper 
+ */
+const uint8_t MCResetMaxAttempts = 5;
 
 struct __attribute__((packed)) {
     volatile uint16_t APPS2;
@@ -157,7 +189,9 @@ int main(){
     }
 
     GPIO_Init(); /* must be called first */
-
+ 
+    BUZZEROFF(); /* turns that buzzer the fuck off */
+    
     RTOS_init();
 
     car_state.state_idle = RTOS_addState(0, 0);
@@ -175,7 +209,7 @@ int main(){
 
 #if MCWATCHDOG == 1
     RTOS_scheduleTask(car_state.state_idle, MCWatchdog, 1000); //Every one second
-    RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, 1000); //Every one second
+    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 1000); //Every one second
 #endif
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
@@ -214,6 +248,8 @@ void Control() {
 
 void InputIdle(){
     if(!(GPIOB->IDR & GPIO_IDR_1)){
+        car_state.MCResetAttempts = MCResetMaxAttempts;
+
         if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
             && !areThereFaults())
         {
@@ -240,10 +276,9 @@ void CanReset(){
 #endif
 
 void send_Diagnostics(){ 
-    GPIOB->ODR ^= 1 << 3;
-
-    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t*)&ADC_Vars.APPS2);
+    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
+    send_CAN(0x06, 8, (uint8_t *)&appsCalibrationValues);
 
     /* TODO: this but better */
     uint8_t statemsg[2] = {
@@ -254,25 +289,28 @@ void send_Diagnostics(){
 }
 
 void __turn_that_buzzer_the_fuck_off(){
-    GPIOB->ODR &= ~GPIO_ODR_5; /* turns that buzzer the fuck off */ 
+    BUZZEROFF(); /* turns that buzzer the fuck off */
 }
 
 int areThereFaults(){
-    if(car_state.faults.fc.runtimeErrors > 0) return 1;
+    if(car_state.faults.fc.runtimeErrors & (1 << 10)) return 1;
 
     else return 0;
 }
 
 void RTD_start(){
-    GPIOB->ODR |= GPIO_ODR_5; /* buzzer */
+    GPIOB->ODR ^= 1 << 3;
+    BUZZERON(); /* buzzer */ 
+    GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
-    RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 3000);
+    RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 1500);
 }
 
 void MCWatchdog(){
     if(areThereFaults()){
         if(RTOS_inState(car_state.state_rtd)){
             canmsg.inverterEnable = 0;
+            GPIOA->ODR |= 1 << 9;
             RTOS_switchState(car_state.state_idle);
         }
         
@@ -371,10 +409,10 @@ void GPIO_Init(){
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
     RCC->AHBENR |= RCC_AHBENR_GPIOBEN; 
 
-    GPIOA->MODER |= (MODE_INPUT     << GPIO_MODER_MODER0_Pos)   /* PORTA_GPIO   */
+    GPIOA->MODER |= (MODE_OUTPUT    << GPIO_MODER_MODER0_Pos)   /* PORTA_GPIO   */
                  |  (MODE_ANALOG    << GPIO_MODER_MODER1_Pos)   /* APPS2        */
-                 |  (MODE_INPUT     << GPIO_MODER_MODER3_Pos)   /* PORTA_GPIO   */
-                 |  (MODE_INPUT     << GPIO_MODER_MODER4_Pos)   /* PORTA_GPIO   */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER3_Pos)   /* PORTA_GPIO   */
+                 |  (MODE_OUTPUT    << GPIO_MODER_MODER4_Pos)   /* PORTA_GPIO   */
                  |  (MODE_ANALOG    << GPIO_MODER_MODER5_Pos)   /* RBPS         */
                  |  (MODE_ANALOG    << GPIO_MODER_MODER6_Pos)   /* FBPS         */
                  |  (MODE_OUTPUT    << GPIO_MODER_MODER9_Pos)   /* RTD_LIGHT    */
@@ -478,6 +516,27 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
+
+    if (fault == 0) {
+        GPIOA->ODR &= ~(1 << 3);
+        GPIOA->ODR &= ~(1 << 4);
+        GPIOA->ODR |= (1);
+    }
+    else if (fault == 1) {
+        GPIOA->ODR |=  (1 << 3);
+        GPIOA->ODR &= ~(1 << 4);
+        GPIOA->ODR &= ~1;
+    }
+    else if (fault == 2){
+        GPIOA->ODR &= ~(1 << 3);
+        GPIOA->ODR |=  (1 << 4);
+        GPIOA->ODR &= ~1;
+    }
+    else if (fault == 3){
+        GPIOA->ODR |=  (1 << 3);
+        GPIOA->ODR |=  (1 << 4);
+        GPIOA->ODR &= ~1;
+    }
 
 #if REGENBRAKING == 1
     /* TODO: REGEN? */
