@@ -2,6 +2,10 @@
  * NICOLE SWIERSTRA
  * 
  * VIKING 66 VCU CODE
+ *
+ * This is the code for the vcu of the wwu racing viking 66 car meant for competition in 2024
+ *
+ * documentation can be found somewhere in the q drive and maybe in the readme if I ever get to it.
  */
 
 #include <stdint.h>
@@ -62,10 +66,10 @@ struct {
         COMPILED_BRAKES_THREASHOLD,
     };
 
-#define MAX_TORQUE_REQ appsCalcParameters.MAX_TORQUE_REQ
-#define MIN_REGEN_REQ appsCalcParameters.MIN_REGEN_REQ
-#define MIN_REGEN_SPEED appsCalcParameters.MIN_REGEN_SPEED
-#define BRAKES_THREASHOLD appsCalcParameters.BRAKES_THREASHOLD
+#define MAX_TORQUE_REQ      (appsCalcParameters.MAX_TORQUE_REQ)
+#define MIN_REGEN_REQ       (appsCalcParameters.MIN_REGEN_REQ)
+#define MIN_REGEN_SPEED     (appsCalcParameters.MIN_REGEN_SPEED)
+#define BRAKES_THREASHOLD   (appsCalcParameters.BRAKES_THREASHOLD)
 
 /*
  * APPS VALUES
@@ -321,7 +325,7 @@ void Idle_start(){
 
 void RTD_start(){
     BUZZERON(); /* buzzer */ 
-    send_CAN(, uint8_t, uint8_t *);
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t *)&canmsg);
     GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
     RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 1500);
@@ -559,7 +563,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 #endif
 
     
-    /* TODO: This?
+    /* 
      * if(t_req > GetTCMax()) 
      */
 
