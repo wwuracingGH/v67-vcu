@@ -21,19 +21,8 @@
 #define ROLLING_ADC_VALS  (ROLLING_ADC_FRAMES * 4)
 
 /*
- * APPS CALC PARAMETERS
- */
-#define MIN_TORQUE_REQ      0
-#define MIN_REGEN_REQ       0   /* not real */
-#define MIN_REGEN_SPEED     0
-#define MAX_TORQUE_REQ      100
-#define BRAKES_THREASHOLD   500 /* change this in the future */
-
-/*
  * EXTRA BEHAVIOR - 0 or 1
  */
-#define CANWATCHDOG         0 
-#define MCWATCHDOG          0 /* resets the motor controller if there are any faults and leaves RTD */
 #define TRACTIONCONTROL     0 /* does nothing rn */
 #define REGENBRAKING        0 /* does nothing rn */
 
@@ -49,17 +38,43 @@
  * I HAVE NO IDEA HOW THE MOSFET WORKS
  */
 
-#define BUZZERON()              GPIOB->ODR |= GPIO_ODR_5
-#define BUZZEROFF()             GPIOB->ODR &= ~GPIO_ODR_5
+#define BUZZERON()              (GPIOB->ODR |= GPIO_ODR_5)
+#define BUZZEROFF()             (GPIOB->ODR &= ~GPIO_ODR_5)
+
+/*
+ * APPS CALC PARAMETERS
+ */
+
+#define COMPILED_MIN_REGEN_REQ       0   /* not real */
+#define COMPILED_MIN_REGEN_SPEED     0
+#define COMPILED_MAX_TORQUE_REQ      100
+#define COMPILED_BRAKES_THREASHOLD   450
+
+struct {
+    uint32_t MAX_TORQUE_REQ;
+    uint32_t MIN_REGEN_REQ;
+    uint32_t MIN_REGEN_SPEED;
+    uint32_t BRAKES_THREASHOLD;
+} appsCalcParameters __attribute__((section(".usrdat"))) = {
+        COMPILED_MAX_TORQUE_REQ,
+        COMPILED_MIN_REGEN_REQ,
+        COMPILED_MIN_REGEN_SPEED,
+        COMPILED_BRAKES_THREASHOLD,
+    };
+
+#define MAX_TORQUE_REQ appsCalcParameters.MAX_TORQUE_REQ
+#define MIN_REGEN_REQ appsCalcParameters.MIN_REGEN_REQ
+#define MIN_REGEN_SPEED appsCalcParameters.MIN_REGEN_SPEED
+#define BRAKES_THREASHOLD appsCalcParameters.BRAKES_THREASHOLD
 
 /*
  * APPS VALUES
  */
 
 #define COMPILED_APPS1_MIN 1500
-#define COMPILED_APPS2_MIN 400
-#define COMPILED_APPS1_MAX 3700
-#define COMPILED_APPS2_MAX 2550
+#define COMPILED_APPS2_MIN 1823
+#define COMPILED_APPS1_MAX 1996
+#define COMPILED_APPS2_MAX 2700
 
 struct {
     uint32_t APPS1_MIN;
@@ -74,7 +89,6 @@ struct {
         COMPILED_APPS2_MAX
     };
 
-
 #define APPS1_MIN appsCalibrationValues.APPS1_MIN
 #define APPS1_MAX appsCalibrationValues.APPS1_MAX
 #define APPS2_MIN appsCalibrationValues.APPS2_MIN
@@ -85,7 +99,7 @@ struct {
  * APPS DEADZONE
  */
 const float SENSOR_MIN = -0.10f;
-const float SENSOR_MAX =  1.10f;
+const float SENSOR_MAX =  1.25f;
 
 /* 
  * RTOS FUNCTION PERIODS - in MS
@@ -114,9 +128,6 @@ struct {
     int state_idle, state_rtd;
     volatile uint16_t torque_req;
     uint16_t lastAPPSFault;
-#if CANWATCHDOG == 1
-    uint8_t hasSeenBusActivity; /* Can watchdog */
-#endif
     uint8_t MCResetAttempts; /* number of resets until it stops */
     struct{
         uint16_t apps1, apps2, torque, fault;
@@ -130,12 +141,20 @@ struct {
         uint64_t bits;
     } faults;
     union {
+        MC_InternalStates is;
+        uint64_t bits;
+    } mcstate;
+    union {
+        MC_VoltageInfo vi;
+        uint64_t bits;
+    } voltageinfo;
+    union {
         DL_WheelSpeed ws;
         uint64_t bits;
     } wheelspeed;
     union {
         DL_CarAcceleration ca;
-        uint32_t bits;
+        uint64_t bits;
     } acceleration;
 } car_state;
 
@@ -171,14 +190,22 @@ void send_CAN(uint16_t, uint8_t, uint8_t*);
 void process_CAN(CAN_msg);
 void recieve_CAN();
 void RTD_start();
+void Idle_start();
 
 int areThereFaults();
 
-/* global stuff */
-MC_Command canmsg = {0, 0, 0, 0, 0, 0, 0, 0};
-MC_ParameterCommand resetMC = {20, 1, 0, 0, 0};
+void reprogram();
+void reprogramAPPS(VCU_ReprogramApps ra);
+void reprogramControl(VCU_ReprogramControl rc);
 
-kernel rtos_scheduler = {0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}}; 
+/* global stuff */
+MC_Command canmsg = {0, 0, 1, 0, 0, 0, 0, 0};
+MC_ParameterCommand resetMC = {20, 1, 0, 0, 0};
+MC_ParameterCommand torqueLimitMsg = { 129, 1, 0, MAX_TORQUE_REQ, 0 };
+MC_ParameterCommand fastMsg = {227, 1, 0, 0xFFFE, 0}; /* TODO: verify */
+MC_ParameterCommand shutup = { 148, 1, 0, 0b0001110011100111, 0xFFFF};
+
+kernel rtos_scheduler = {0, -1, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}}; 
 
 int main(){
     /* setup */
@@ -194,23 +221,16 @@ int main(){
     
     RTOS_init();
 
-    car_state.state_idle = RTOS_addState(0, 0);
+    car_state.state_idle = RTOS_addState(Idle_start, 0);
     car_state.state_rtd  = RTOS_addState(RTD_start, 0);
-
-    RTOS_switchState(car_state.state_idle);
 
     RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
     RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
-#if CANWATCHDOG == 1
-    RTOS_scheduleTask(car_state.state_idle, CanReset, canWDPeriod);
-#endif
 
-#if MCWATCHDOG == 1
-    RTOS_scheduleTask(car_state.state_idle, MCWatchdog, 1000); //Every one second
-    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 1000); //Every one second
-#endif
+    RTOS_scheduleTask(car_state.state_idle, MCWatchdog, 1000); /* Every one second */
+    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 1000); /* Every one second */
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
@@ -219,9 +239,12 @@ int main(){
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
-    /*                                          |   |   |   |       |   |   |   |    */
-    MC_ParameterCommand shutup = { 0, 1, 148, 0b0001110011100111, 0b0000000000000010};
+
+    /* TODO: shutup every time the MC yaps */
     send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
+    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&torqueLimitMsg);
+
+    RTOS_switchState(car_state.state_idle);
 
     SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
     __enable_irq(); /* enable interrupts */
@@ -243,17 +266,21 @@ void Control() {
     car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
     canmsg.torqueCommand = car_state.torque_req;
-    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&canmsg);    
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);    
 }
 
 void InputIdle(){
     if(!(GPIOB->IDR & GPIO_IDR_1)){
-        car_state.MCResetAttempts = MCResetMaxAttempts;
-
         if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
             && !areThereFaults())
         {
+            if (car_state.mcstate.is.inverterState != 4) return;
+            
             RTOS_switchState(car_state.state_rtd);
+
+            while(car_state.mcstate.is.inverterState == 5) recieve_CAN();
+
+            if(car_state.mcstate.is.inverterState != 6) RTOS_switchState(car_state.state_idle);
         }
         else if (areThereFaults()) {
             MCWatchdog();
@@ -265,15 +292,6 @@ void InputRTD(){
 
 
 }
-
-
-#if CANWATCHDOG == 1
-void CanReset(){
-    if(!car_state.hasSeenBusActivity){
-        CAN_Init();
-    }
-}
-#endif
 
 void send_Diagnostics(){ 
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
@@ -293,14 +311,17 @@ void __turn_that_buzzer_the_fuck_off(){
 }
 
 int areThereFaults(){
-    if(car_state.faults.fc.runtimeErrors & (1 << 10)) return 1;
+    return !!car_state.faults.fc.runtimeErrors;
+}
 
-    else return 0;
+void Idle_start(){
+    canmsg.inverterEnable = 0;
+    GPIOA->ODR |= 1 << 9;
 }
 
 void RTD_start(){
-    GPIOB->ODR ^= 1 << 3;
     BUZZERON(); /* buzzer */ 
+    send_CAN(, uint8_t, uint8_t *);
     GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
     RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 1500);
@@ -309,17 +330,29 @@ void RTD_start(){
 void MCWatchdog(){
     if(areThereFaults()){
         if(RTOS_inState(car_state.state_rtd)){
-            canmsg.inverterEnable = 0;
-            GPIOA->ODR |= 1 << 9;
             RTOS_switchState(car_state.state_idle);
         }
         
-        if(car_state.MCResetAttempts > 0){
-            send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
-        }
+        /* waits until discharge is complete */
+        while(car_state.voltageinfo.vi.dcBusVoltage > 20); 
 
-        car_state.MCResetAttempts--;
+        send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
     } 
+}
+
+/* TODO: implement reprogramming */
+void reprogram() {
+
+}
+
+void reprogramAPPS(VCU_ReprogramApps ra) {
+    reprogram();
+    NVIC_SystemReset();
+}
+
+void reprogramControl(VCU_ReprogramControl rc) {
+    reprogram();
+    NVIC_SystemReset();
 }
 
 void clock_init() /* turns on hsi48 and sets as system clock */
@@ -454,7 +487,7 @@ void APPS_RollingSmooth(){
     ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
-int GetTCMax(float coeff_friction){
+int GetTCMax(){
 #if TRACTIONCONTROL == 1
     const float mass_KG = 240;
     const float rearAxel_Moment = 0.78f;
@@ -517,30 +550,18 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
 
-    if (fault == 0) {
-        GPIOA->ODR &= ~(1 << 3);
-        GPIOA->ODR &= ~(1 << 4);
-        GPIOA->ODR |= (1);
-    }
-    else if (fault == 1) {
-        GPIOA->ODR |=  (1 << 3);
-        GPIOA->ODR &= ~(1 << 4);
-        GPIOA->ODR &= ~1;
-    }
-    else if (fault == 2){
-        GPIOA->ODR &= ~(1 << 3);
-        GPIOA->ODR |=  (1 << 4);
-        GPIOA->ODR &= ~1;
-    }
-    else if (fault == 3){
-        GPIOA->ODR |=  (1 << 3);
-        GPIOA->ODR |=  (1 << 4);
-        GPIOA->ODR &= ~1;
-    }
+    GPIOA->ODR &= 0b1111111111100110;
+    GPIOA->ODR |= (fault << 3) | !fault;
+    
 
 #if REGENBRAKING == 1
     /* TODO: REGEN? */
 #endif
+
+    
+    /* TODO: This?
+     * if(t_req > GetTCMax()) 
+     */
 
     *torque = t_req;
     return fault;
@@ -570,10 +591,6 @@ void recieve_CAN(){
 
         CAN_msg canrx = {can_id, can_len, can_data};
         process_CAN(canrx);
-
-#if CANWATCHDOG == 1
-        car_state.hasSeenBusActivity = 1;
-#endif
     }
 }
 
@@ -591,5 +608,10 @@ void process_CAN(CAN_msg cm){
         case MC_CANID_FAULTCODES:
             car_state.faults.bits = cm.data;
             break;
+        case MC_CANID_VOLTAGEINFO:
+            car_state.voltageinfo.bits = cm.data;
+            break;
+        case MC_CANID_INTERNALSTATES:
+            car_state.mcstate.bits = cm.data;
     }
 }

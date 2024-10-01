@@ -7,6 +7,7 @@
  */ 
 
 #define MC_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
+#define VCU_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
 
 typedef int16_t     MC_Temperature;
 typedef int16_t     MC_LowVoltage;
@@ -34,6 +35,8 @@ typedef uint8_t     MC_Byte;
 #define VCU_CANID_WHEELSPEED               0x003
 #define VCU_CANID_ACCEL                    0x004
 #define VCU_CANID_STATE                    0x005
+#define VCU_CANID_REPROGRAMAPPS            0x006
+#define VCU_CANID_REPROGRAMCONTROL         0x007
 
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1
@@ -285,14 +288,28 @@ MC_CANSTRUCT {
     uint16_t HighData;
 } MC_ParameterCommand;
 
-MC_CANSTRUCT {
+VCU_CANSTRUCT {
     uint16_t wheelSpeed_FL;
     uint16_t wheelSpeed_FR;
     uint16_t wheelSpeed_BL;
     uint16_t wheelSpeed_BR;
 } DL_WheelSpeed;
 
-MC_CANSTRUCT {
+VCU_CANSTRUCT {
     uint16_t carAccel_X;
     uint16_t carAccel_Y;
 } DL_CarAcceleration;
+
+VCU_CANSTRUCT {
+    uint16_t new_APPS1_MIN;
+    uint16_t new_APPS1_MAX;
+    uint16_t new_APPS2_MIN;
+    uint16_t new_APPS2_MAX;
+} VCU_ReprogramApps;
+
+VCU_CANSTRUCT {
+    uint16_t new_MaxTorqueReq;
+    uint16_t new_MinRegenReq;
+    uint16_t new_MinRegenSpeed;
+    uint16_t new_BrakeThreashold;
+} VCU_ReprogramControl;
