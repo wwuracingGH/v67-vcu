@@ -4,12 +4,12 @@ Step 0. Plug in the vcu (12v power and STlink)
 Step 1. Clone the github repo (https://github.com/wwuracingGH/v66-vcu.git)
 
 Step 2. Install arm eabi compiler (easier if you use Linux):
-If on windows, you'll need both the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) and [MinGW64](https://www.mingw-w64.org/downloads/)
-WSL/Linux just run ‘sudo apt-get install arm-none-eabi-gcc’
+If on windows, you'll need both the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) and [MinGW64](https://www.mingw-w64.org/downloads/)  
+WSL/Linux just run ‘sudo apt-get install arm-none-eabi-gcc’  
 In either case, verify by running `arm-none-eabi-gcc --version` 
 
 Step 3. Build and Install OpenOCD (go here https://github.com/xpack-dev-tools/openocd-xpack/releases and then scroll down to a version with windows binaries  and click on them), and add these to your [path environment variables](https://www.wikihow.com/Change-the-PATH-Environment-Variable-on-Windows) 
-![image](https://github.com/user-attachments/assets/1e998733-c6b4-41d7-8f8b-7722a3cc2d15)
+![image](https://github.com/user-attachments/assets/1e998733-c6b4-41d7-8f8b-7722a3cc2d15)  
 Check that you can run it with `openocd -v`. You might have to log out and back in for your PATH changes to go into effect
 
 Step 4. Make sure the drivers for the st-link are updated. Go into device manager, and make sure it’s recognized and not a generic usb device. If it isn’t, the drivers are on stms website: (https://www.st.com/en/development-tools/stsw-link009.html)
