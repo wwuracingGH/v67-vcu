@@ -1,24 +1,32 @@
 # Programming the VCU #
-Step 0. Plug in the vcu
+Step 0. Plug in the vcu (12v power and STlink)
 
 Step 1. Clone the github repo (https://github.com/wwuracingGH/v66-vcu.git)
 
 Step 2. Install arm eabi compiler (easier if you use Linux):
-If on just windows, something like https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads + mingw should work ||
-WSL/Linux just run ‘sudo apt-get install arm-none-eabi-gcc’ or something like that I think
+If on windows, you'll need both the [ARM GNU toolchain](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads) and [MinGW64](https://www.mingw-w64.org/downloads/)
+WSL/Linux just run ‘sudo apt-get install arm-none-eabi-gcc’
+In either case, verify by running `arm-none-eabi-gcc --version` 
 
-Step 3. Build and Install OpenOCD (go here https://github.com/xpack-dev-tools/openocd-xpack/releases and then scroll down to a version with windows binaries  and click on them), and add these to your path environment variables 
+Step 3. Build and Install OpenOCD (go here https://github.com/xpack-dev-tools/openocd-xpack/releases and then scroll down to a version with windows binaries  and click on them), and add these to your [path environment variables](https://www.wikihow.com/Change-the-PATH-Environment-Variable-on-Windows) 
 ![image](https://github.com/user-attachments/assets/1e998733-c6b4-41d7-8f8b-7722a3cc2d15)
+Check that you can run it with `openocd -v`. You might have to log out and back in for your PATH changes to go into effect
 
-Step 4. Make sure the drivers for the stm-link are updated. Go into device manager, and make sure it’s recognized and not a generic usb device. If it isn’t, the drivers are on stms website, I think.
+Step 4. Make sure the drivers for the st-link are updated. Go into device manager, and make sure it’s recognized and not a generic usb device. If it isn’t, the drivers are on stms website: (https://www.st.com/en/development-tools/stsw-link009.html)
 
 ![image](https://github.com/user-attachments/assets/82b28174-9616-44c7-9f0e-a54d8152df83)
 
-Step 5. Verify that your environment contains make. If it doesn’t, you might need to either use mingw or Cygwin to install make onto windows. If you are using linux it should be standard.
+Step 5. Verify that your environment contains make by running `make --version`. If on windows, you should already have installed [MinGW64](https://www.mingw-w64.org/downloads/) in step 2. If you are using linux it should be standard.
 
 Step 6. In the environment with both make and the EABI compiler, run “make”
 
-Step 7. In an environment with openOCD and make, run “make program”. If you don’t want to install make onto a windows env, copy the line under “program:” and replace $(Binary) with v66vcu.elf 
+Step 7. In an environment with openOCD and make, run “make program”. 
+
+#### Special cases: ####
+For step 7: If you don’t want to install make onto a windows env, copy the line under “program:” and replace $(Binary) with v66vcu.elf 
+
+# VCU debugging with GDB #
+Coming soon?
 
 # Troubleshooting: #
 VCU not connecting to bus.
@@ -30,7 +38,7 @@ VCU not connecting to bus.
 
 Car not turning on
 
-1.	Check APPS calibration message from vcu, go to apps calibration
+1.	Check APPS calibration message from vcu, if both APPS pedals aren't at zero or if there's an APPS error the car won't go into RTD.
 
 2.	panic 
 
@@ -109,7 +117,7 @@ The design goals of LLLLRTTSOS (Low Level Linked List Real Time Task/event Sched
 
 3.	Cut down on the crazy number of side effects (parts of a function that modify state outside the parameters or return value of a function). The old code had ALL side effects, which made it a bit of a nightmare to debug sometimes.
 
-4.	Real time processing. The ability to time when messages will appear on the bus exactly will lead to best results for a lower bit rate bus. This was the big reason for switching to RTOS, which started the side effects roulette, which as it would be a nightmare to debug I ended up deciding to refactor the code before test days started. and by extension got kicked off the team.
+4.	Real time processing. The ability to time when messages will appear on the bus exactly will lead to best results for a lower bit rate bus. This was the big reason for switching to RTOS, which started the side effects roulette, which as it would be a nightmare to debug I ended up deciding to refactor the code before test days started.
 
 5.	No heap. Malloc? More like segmentation fault! (6kb of ram 😔). This means everything is stack allocated, which means it is explicit and must always contain data, which limits some of the more object-oriented code.
 
