@@ -40,6 +40,10 @@ cleanall:
 program:
 	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "program $(BINARY) verify reset exit"
 
+.PHONY: debug
+debug:
+	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg  
+
 .PHONY: reset
 reset:
 	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "reset"
