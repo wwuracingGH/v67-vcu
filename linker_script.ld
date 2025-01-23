@@ -2,9 +2,8 @@ ENTRY(reset_handler)
 
 MEMORY
 {
-    FLASH (rx):     ORIGIN = 0x08000000, LENGTH = 31K
+    FLASH (rx):     ORIGIN = 0x08000000, LENGTH = 32K
     SRAM (rwx):     ORIGIN = 0x20000000, LENGTH = 6K
-    USRFLASH (rwx): ORIGIN = 0x08007C00, LENGTH = 1K
 }
 
 SECTIONS
@@ -48,12 +47,6 @@ SECTIONS
 		. = ALIGN(4);
 		_ebss = .;
 	} >SRAM
-
-    .usrdat : 
-    {
-        . = ALIGN(4);
-        *(.usrdat)
-    } >USRFLASH
 }
 
 PROVIDE(__aeabi_fsub 	= qfp_fsub);

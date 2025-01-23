@@ -49,43 +49,44 @@
  * APPS CALC PARAMETERS
  */
 
-#define COMPILED_MIN_REGEN_REQ       0   /* not real */
 #define COMPILED_MIN_REGEN_SPEED     0
-#define COMPILED_MAX_TORQUE_REQ      100
+#define COMPILED_MIN_TORQUE_REQ      0
+#define COMPILED_MAX_TORQUE_REQ      500
 #define COMPILED_BRAKES_THREASHOLD   450
 
 struct {
-    uint32_t MAX_TORQUE_REQ;
-    uint32_t MIN_REGEN_REQ;
-    uint32_t MIN_REGEN_SPEED;
-    uint32_t BRAKES_THREASHOLD;
-} appsCalcParameters __attribute__((section(".usrdat"))) = {
+    uint16_t MAX_TORQUE_REQ;
+    uint16_t MIN_TORQUE_REQ;
+    uint16_t MIN_REGEN_RPM;
+    uint16_t BRAKES_THREASHOLD;
+} appsCalcParameters = 
+    {
         COMPILED_MAX_TORQUE_REQ,
-        COMPILED_MIN_REGEN_REQ,
+        COMPILED_MIN_TORQUE_REQ,
         COMPILED_MIN_REGEN_SPEED,
         COMPILED_BRAKES_THREASHOLD,
     };
 
-#define MAX_TORQUE_REQ      (appsCalcParameters.MAX_TORQUE_REQ)
-#define MIN_REGEN_REQ       (appsCalcParameters.MIN_REGEN_REQ)
-#define MIN_REGEN_SPEED     (appsCalcParameters.MIN_REGEN_SPEED)
-#define BRAKES_THREASHOLD   (appsCalcParameters.BRAKES_THREASHOLD)
+#define MIN_TORQUE_REQ      appsCalcParameters.MIN_TORQUE_REQ
+#define MAX_TORQUE_REQ      appsCalcParameters.MAX_TORQUE_REQ
+#define MIN_REGEN_SPEED     appsCalcParameters.MIN_REGEN_SPEED
+#define BRAKES_THREASHOLD   appsCalcParameters.BRAKES_THREASHOLD
 
 /*
  * APPS VALUES
  */
 
-#define COMPILED_APPS1_MIN 1500
+#define COMPILED_APPS1_MIN 1130
 #define COMPILED_APPS2_MIN 1823
 #define COMPILED_APPS1_MAX 1996
 #define COMPILED_APPS2_MAX 2700
 
 struct {
-    uint32_t APPS1_MIN;
-    uint32_t APPS1_MAX;
-    uint32_t APPS2_MIN;
-    uint32_t APPS2_MAX;
-} appsCalibrationValues __attribute__((section(".usrdat"))) = 
+    uint16_t APPS1_MIN;
+    uint16_t APPS1_MAX;
+    uint16_t APPS2_MIN;
+    uint16_t APPS2_MAX;
+} appsCalibrationValues = 
     {
         COMPILED_APPS1_MIN, 
         COMPILED_APPS1_MAX, 
@@ -102,8 +103,8 @@ struct {
 /*
  * APPS DEADZONE
  */
-const float SENSOR_MIN = -0.10f;
-const float SENSOR_MAX =  1.25f;
+const float SENSOR_MIN = -0.15f;
+const float SENSOR_MAX =  1.15f;
 
 /* 
  * RTOS FUNCTION PERIODS - in MS
@@ -205,7 +206,7 @@ void reprogramControl(VCU_ReprogramControl rc);
 /* global stuff */
 MC_Command canmsg = {0, 0, 1, 0, 0, 0, 0, 0};
 MC_ParameterCommand resetMC = {20, 1, 0, 0, 0};
-MC_ParameterCommand torqueLimitMsg = { 129, 1, 0, MAX_TORQUE_REQ, 0 };
+MC_ParameterCommand torqueLimitMsg = { 129, 1, 0, COMPILED_MAX_TORQUE_REQ, 0 };
 MC_ParameterCommand fastMsg = {227, 1, 0, 0xFFFE, 0}; /* TODO: verify */
 MC_ParameterCommand shutup = { 148, 1, 0, 0b0001110011100111, 0xFFFF};
 
@@ -350,13 +351,16 @@ void reprogram() {
 }
 
 void reprogramAPPS(VCU_ReprogramApps ra) {
+    APPS1_MAX = ra.new_APPS1_MAX;
+    APPS1_MIN = ra.new_APPS1_MIN;
+    APPS2_MAX = ra.new_APPS2_MAX;
+    APPS2_MIN = ra.new_APPS2_MIN;
+
     reprogram();
-    NVIC_SystemReset();
 }
 
 void reprogramControl(VCU_ReprogramControl rc) {
     reprogram();
-    NVIC_SystemReset();
 }
 
 void clock_init() /* turns on hsi48 and sets as system clock */
@@ -511,12 +515,13 @@ int GetTCMax(){
 
     float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
 
+    return 0;
 #else
     return MAX_TORQUE_REQ; 
 #endif
 }
 
-//returns 1 if there's an issue
+/* returns 1 if there's an issue */
 int APPS_calc(uint16_t *torque, uint16_t lastFault){
     uint16_t fault = 0, t_req = 0;
     
@@ -554,18 +559,11 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
 
-    GPIOA->ODR &= 0b1111111111100110;
-    GPIOA->ODR |= (fault << 3) | !fault;
-    
-
 #if REGENBRAKING == 1
     /* TODO: REGEN? */
-#endif
-
+#endif 
     
-    /* 
-     * if(t_req > GetTCMax()) 
-     */
+    if(t_req > GetTCMax()) t_req = GetTCMax();
 
     *torque = t_req;
     return fault;
@@ -617,5 +615,16 @@ void process_CAN(CAN_msg cm){
             break;
         case MC_CANID_INTERNALSTATES:
             car_state.mcstate.bits = cm.data;
+            break;
+        case VCU_CANID_REPROGRAMAPPS:
+            reprogramAPPS(*(VCU_ReprogramApps *)&cm.data);
+            break;
+        case VCU_CANID_REPROGRAMCONTROL:
+            reprogramControl(*(VCU_ReprogramControl *)&cm.data);
+            break;
+        case VCU_CANID_REVEAL_VALS:
+            send_CAN(VCU_CANID_APPS_VALS, 8, (uint8_t *)&appsCalibrationValues);
+            send_CAN(VCU_CANID_CONTROL_VALS, 8, (uint8_t *)&appsCalcParameters);
+            break;
     }
 }

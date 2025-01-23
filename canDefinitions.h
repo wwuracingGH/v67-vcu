@@ -37,6 +37,9 @@ typedef uint8_t     MC_Byte;
 #define VCU_CANID_STATE                    0x005
 #define VCU_CANID_REPROGRAMAPPS            0x006
 #define VCU_CANID_REPROGRAMCONTROL         0x007
+#define VCU_CANID_REVEAL_VALS              0x008
+#define VCU_CANID_APPS_VALS                0x009
+#define VCU_CANID_CONTROL_VALS             0x00A
 
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1

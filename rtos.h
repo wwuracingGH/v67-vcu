@@ -4,7 +4,7 @@
 
 #define RTOS_maxEventNum 16
 #define RTOS_maxTaskNum  64
-#define RTOS_maxStateNum  8
+#define RTOS_maxStateNum 16
 
 typedef struct {
     void (*callback)();
