@@ -322,7 +322,6 @@ void InputRTD(){
 void send_Diagnostics(){ 
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
-    send_CAN(VCU_CANID_REPROGRAMAPPS, 8, (uint8_t *)&config.calibration);
 
     /* TODO: this but better */
     uint8_t statemsg[2] = {
