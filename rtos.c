@@ -161,9 +161,7 @@ extern int RTOS_Update(){
         rtos_scheduler.eventQue |= (1 << eventpointer);
         eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;
     }
-    /* Two loops might seem weird but the lack of that if statement in a 16 full queue saves 
-     * ~50-100 clock cycles between the branch prediction and the cmp instruction, and 
-     * this function is as uncluttered as possible on purpose. */
+
     while (eventpointer != -1){
         rtos_scheduler.eventHeap[eventpointer].countdown--;
         eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;

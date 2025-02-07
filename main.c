@@ -29,6 +29,7 @@
  */
 #define TRACTIONCONTROL     0 /* does nothing rn */
 #define REGENBRAKING        0 /* does nothing rn */
+#define MC_RESET_BITMASK    0x00000400
 
 /*
  * HELPER FUNCTIONS
@@ -47,6 +48,8 @@
 
 /*
  * APPS CALC PARAMETERS
+ *
+ * These are settings that are both compiled and written to by the  
  */
 
 #define COMPILED_MIN_REGEN_SPEED     0
@@ -54,51 +57,56 @@
 #define COMPILED_MAX_TORQUE_REQ      500
 #define COMPILED_BRAKES_THREASHOLD   450
 
-struct {
-    uint16_t MAX_TORQUE_REQ;
-    uint16_t MIN_TORQUE_REQ;
-    uint16_t MIN_REGEN_RPM;
-    uint16_t BRAKES_THREASHOLD;
-} appsCalcParameters = 
-    {
-        COMPILED_MAX_TORQUE_REQ,
-        COMPILED_MIN_TORQUE_REQ,
-        COMPILED_MIN_REGEN_SPEED,
-        COMPILED_BRAKES_THREASHOLD,
-    };
-
-#define MIN_TORQUE_REQ      appsCalcParameters.MIN_TORQUE_REQ
-#define MAX_TORQUE_REQ      appsCalcParameters.MAX_TORQUE_REQ
-#define MIN_REGEN_SPEED     appsCalcParameters.MIN_REGEN_SPEED
-#define BRAKES_THREASHOLD   appsCalcParameters.BRAKES_THREASHOLD
-
-/*
- * APPS VALUES
- */
-
 #define COMPILED_APPS1_MIN 1130
 #define COMPILED_APPS2_MIN 1823
 #define COMPILED_APPS1_MAX 1996
 #define COMPILED_APPS2_MAX 2700
 
-struct {
+typedef struct  {
     uint16_t APPS1_MIN;
     uint16_t APPS1_MAX;
     uint16_t APPS2_MIN;
     uint16_t APPS2_MAX;
-} appsCalibrationValues = 
+} _appsCalibrationValues; 
+
+typedef struct  {
+    uint16_t MAX_TORQUE_REQ;
+    uint16_t MIN_TORQUE_REQ;
+    uint16_t MIN_REGEN_SPEED;
+    uint16_t BRAKES_THREASHOLD;
+} _appsCalcParameters;
+
+typedef struct {
+    uint32_t size;
+    _appsCalibrationValues calibration;
+    _appsCalcParameters    calculation;
+} _settings;
+
+static const volatile _settings config __attribute__((section(".config"))) = {
+    sizeof(config),
     {
         COMPILED_APPS1_MIN, 
         COMPILED_APPS1_MAX, 
         COMPILED_APPS2_MIN, 
         COMPILED_APPS2_MAX
-    };
+    },
+    {
+        COMPILED_MAX_TORQUE_REQ,
+        COMPILED_MIN_TORQUE_REQ,
+        COMPILED_MIN_REGEN_SPEED,
+        COMPILED_BRAKES_THREASHOLD,
+    }
+};
 
-#define APPS1_MIN appsCalibrationValues.APPS1_MIN
-#define APPS1_MAX appsCalibrationValues.APPS1_MAX
-#define APPS2_MIN appsCalibrationValues.APPS2_MIN
-#define APPS2_MAX appsCalibrationValues.APPS2_MAX
+#define APPS1_MIN config.calibration.APPS1_MIN
+#define APPS1_MAX config.calibration.APPS1_MAX
+#define APPS2_MIN config.calibration.APPS2_MIN
+#define APPS2_MAX config.calibration.APPS2_MAX
 
+#define MIN_TORQUE_REQ      config.calculation.MIN_TORQUE_REQ
+#define MAX_TORQUE_REQ      config.calculation.MAX_TORQUE_REQ
+#define MIN_REGEN_SPEED     config.calculation.MIN_REGEN_SPEED
+#define BRAKES_THREASHOLD   config.calculation.BRAKES_THREASHOLD
 
 /*
  * APPS DEADZONE
@@ -180,6 +188,7 @@ void clock_init();
 void ADC_DMA_Init(uint32_t *dest, uint32_t size);
 void GPIO_Init();
 void CAN_Init();
+void flash_Init();
 
 void default_handler();
 void Control();
@@ -199,7 +208,7 @@ void Idle_start();
 
 int areThereFaults();
 
-void reprogram();
+void reprogram(_settings nc);
 void reprogramAPPS(VCU_ReprogramApps ra);
 void reprogramControl(VCU_ReprogramControl rc);
 
@@ -220,11 +229,15 @@ int main(){
         ADC_RollingValues[i] = 0;
     }
 
+    flash_Init();
+
     GPIO_Init(); /* must be called first */
  
     BUZZEROFF(); /* turns that buzzer the fuck off */
     
     RTOS_init();
+
+    GPIOB->ODR |= 1 << 6;
 
     car_state.state_idle = RTOS_addState(Idle_start, 0);
     car_state.state_rtd  = RTOS_addState(RTD_start, 0);
@@ -261,9 +274,17 @@ int main(){
 }
 
 /* runs every 1 ms */
-void systick_handler()
-{  
+void systick_handler(){  
     RTOS_Update();
+}
+
+void flash_Init(){
+    while ((FLASH->SR & FLASH_SR_BSY) != 0);
+
+    if ((FLASH->CR & FLASH_CR_LOCK) != 0) {
+        FLASH->KEYR = (uint32_t)0x45670123;
+        FLASH->KEYR = (uint32_t)0xCDEF89AB;
+    }
 }
 
 void Control() {
@@ -301,7 +322,7 @@ void InputRTD(){
 void send_Diagnostics(){ 
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
-    send_CAN(0x06, 8, (uint8_t *)&appsCalibrationValues);
+    send_CAN(VCU_CANID_REPROGRAMAPPS, 8, (uint8_t *)&config.calibration);
 
     /* TODO: this but better */
     uint8_t statemsg[2] = {
@@ -316,7 +337,7 @@ void __turn_that_buzzer_the_fuck_off(){
 }
 
 int areThereFaults(){
-    return !!car_state.faults.fc.runtimeErrors;
+    return !!( car_state.faults.fc.runtimeErrors & MC_RESET_BITMASK);
 }
 
 void Idle_start(){
@@ -345,22 +366,83 @@ void MCWatchdog(){
     } 
 }
 
-/* TODO: implement reprogramming */
-void reprogram() {
+/* incredible code right here */
+void reprogram(_settings newConfig) {
+   
+    uint32_t configptr = (uint32_t)&config; 
+    
+    /* 0x007C0008 */
+    /* 0x00008000 */
+    send_CAN(0x12, 4, (uint8_t *)&configptr);
 
+    if (configptr < 0x08007C00 || configptr >= 0x08008000 - sizeof(config)) return;
+    
+    GPIOB->ODR &= ~(1 << 6);
+    for(int i = 0; i < 10000; i++);
+    GPIOB->ODR |= (1 << 6);
+
+    FLASH->CR |= FLASH_CR_PER; /* enable page erase */
+    FLASH->AR = 0x08007C00; /*  start at the 31st page */
+    FLASH->CR |= FLASH_CR_STRT; /* start erasing */
+    while ((FLASH->SR & FLASH_SR_BSY) != 0); /* wait until it's done */
+    if ((FLASH->SR & FLASH_SR_EOP) != 0) /* clear the eop bit */
+    {
+        FLASH->SR = FLASH_SR_EOP;
+    }
+    
+    FLASH->CR &= ~FLASH_CR_PER; /* Turn off page erase */
+
+
+    FLASH->CR |= FLASH_CR_PG;
+    for(uint32_t i = 0; i < sizeof(newConfig)/2; i++){
+        ((uint16_t*)&config)[i] = ((uint16_t*)&newConfig)[i];
+        while ((FLASH->SR & FLASH_SR_BSY) != 0);
+    }
+
+    FLASH->CR &= FLASH_CR_PG;
+
+    NVIC_SystemReset();
+     
 }
 
-void reprogramAPPS(VCU_ReprogramApps ra) {
-    APPS1_MAX = ra.new_APPS1_MAX;
-    APPS1_MIN = ra.new_APPS1_MIN;
-    APPS2_MAX = ra.new_APPS2_MAX;
-    APPS2_MIN = ra.new_APPS2_MIN;
+void reprogramAPPS(VCU_ReprogramApps ra){
+    _settings newConfig = {
+        sizeof(newConfig),
+        {
+            ra.new_APPS1_MIN,
+            ra.new_APPS1_MAX,
+            ra.new_APPS2_MIN,
+            ra.new_APPS2_MAX
+        },
+        {
+            MAX_TORQUE_REQ,
+            MIN_TORQUE_REQ,
+            MIN_REGEN_SPEED,
+            BRAKES_THREASHOLD
+        }
+    };
 
-    reprogram();
+    reprogram(newConfig);
 }
 
-void reprogramControl(VCU_ReprogramControl rc) {
-    reprogram();
+void reprogramControl(VCU_ReprogramControl rc){
+    _settings newConfig = {
+        sizeof(newConfig),
+        {
+            APPS1_MIN,
+            APPS1_MAX,
+            APPS2_MIN,
+            APPS2_MAX
+        },
+        {
+            rc.new_MaxTorqueReq,
+            rc.new_MinRegenReq,
+            rc.new_MinRegenSpeed,
+            rc.new_BrakeThreashold
+        }
+    };
+
+    reprogram(newConfig); 
 }
 
 void clock_init() /* turns on hsi48 and sets as system clock */
@@ -623,8 +705,8 @@ void process_CAN(CAN_msg cm){
             reprogramControl(*(VCU_ReprogramControl *)&cm.data);
             break;
         case VCU_CANID_REVEAL_VALS:
-            send_CAN(VCU_CANID_APPS_VALS, 8, (uint8_t *)&appsCalibrationValues);
-            send_CAN(VCU_CANID_CONTROL_VALS, 8, (uint8_t *)&appsCalcParameters);
+            send_CAN(VCU_CANID_APPS_VALS, 8, (uint8_t *)&config.calibration);
+            send_CAN(VCU_CANID_CONTROL_VALS, 8, (uint8_t *)&config.calculation);
             break;
     }
 }
