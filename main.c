@@ -237,8 +237,6 @@ int main(){
     
     RTOS_init();
 
-    GPIOB->ODR |= 1 << 6;
-
     car_state.state_idle = RTOS_addState(Idle_start, 0);
     car_state.state_rtd  = RTOS_addState(RTD_start, 0);
 
@@ -322,6 +320,7 @@ void InputRTD(){
 void send_Diagnostics(){ 
     send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
     send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
+    send_CAN(VCU_CANID_REPROGRAMAPPS, 8, (uint8_t *)&config.calibration);
 
     /* TODO: this but better */
     uint8_t statemsg[2] = {
