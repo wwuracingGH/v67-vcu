@@ -201,7 +201,7 @@ void MCWatchdog();
 void APPS_RollingSmooth();
 int  APPS_calc(uint16_t*, uint16_t);
 void send_CAN(uint16_t, uint8_t, uint8_t*);
-void process_CAN(CAN_msg);
+void process_CAN(uint16_t id, uint8_t length, uint64_t data);
 void recieve_CAN();
 void RTD_start();
 void Idle_start();
@@ -476,10 +476,12 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5 
                  | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; /*channels to scan */
 
+    /* make sure the ADC's weird clock is on */
     RCC->CR2 |= RCC_CR2_HSI14ON;
     while ((RCC->CR2 & RCC_CR2_HSI14RDY) == 0);
     ADC1->CFGR2 &= (~ADC_CFGR2_CKMODE);
 
+    /* turn on interrupts for dma i think */
     if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
         ADC1->ISR |= ADC_ISR_ADRDY;
     ADC1->CR |= ADC_CR_ADEN;
@@ -499,25 +501,30 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 
 	ADC1->CR |= ADC_CR_ADSTART; /* starts adc */
 
-    NVIC_EnableIRQ(DMA1_Channel1_IRQn); /* (1) */
-    NVIC_SetPriority(DMA1_Channel1_IRQn,0); /* (2) */
+    /* Turns on the actual interrupts */
+    NVIC_EnableIRQ(DMA1_Channel1_IRQn); 
+    NVIC_SetPriority(DMA1_Channel1_IRQn,0);
 }
 
 void CAN_Init (){
     RCC->APB1ENR |= RCC_APB1ENR_CANEN;
-    CAN->MCR |= CAN_MCR_INRQ;
-
-    while (!(CAN->MSR & CAN_MSR_INAK));
+    CAN->MCR |= CAN_MCR_INRQ; /* goes from normal mode into initialization mode */
     
+    while (!(CAN->MSR & CAN_MSR_INAK));
+   
+    /* wakes it up */
     CAN->MCR &= ~CAN_MCR_SLEEP;
     while (CAN->MSR & CAN_MSR_SLAK);
 
+    /* set bittiming - just read wikipedia if you don't know what that is */
+    /* TODO: why is it still 1/2 of what it should be */
     CAN->BTR |= 23 << CAN_BTR_BRP_Pos | 1 << CAN_BTR_TS1_Pos | 0 << CAN_BTR_TS2_Pos;
-    CAN->MCR &= ~CAN_MCR_INRQ;
+    CAN->MCR &= ~CAN_MCR_INRQ; /* clears the initialization request and starts the actual can */
     
     while (CAN->MSR & CAN_MSR_INAK);
 
-    CAN->FMR |= CAN_FMR_FINIT;
+    /* blank filter - tells the can to read every message */
+    CAN->FMR |= CAN_FMR_FINIT; 
     CAN->FA1R |= CAN_FA1R_FACT0;
     CAN->sFilterRegister[0].FR1 = 0; /* Its like a filter, but doesn't filter anything! */
     CAN->sFilterRegister[0].FR2 = 0;
@@ -603,6 +610,9 @@ int GetTCMax(){
 
 /* returns 1 if there's an issue */
 int APPS_calc(uint16_t *torque, uint16_t lastFault){
+    static uint8_t faultCounter = 0;
+    const uint32_t maxFaultCount = 20; //(100 / controlPeriod) - 1; /* 100ms */
+
     uint16_t fault = 0, t_req = 0;
     
     const float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
@@ -630,14 +640,26 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
         fault = 2;
     else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
         fault = 3;
-    else if (RTOS_inState(car_state.state_idle));
-    else /*if there are no faults */
-        t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
- 
+    else
+        faultCounter = 0;
+
+    if (fault != 0) faultCounter++;
+
     car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
     car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
+
+    if (faultCounter > maxFaultCount || RTOS_inState(car_state.state_idle)){
+        t_req = 0; 
+    }
+    else {
+        if (faultCounter > maxFaultCount - 10)
+            t_req = car_state.torque_req - 240; /* gradual decrease to ensure no resolver faults */
+        else 
+            t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
+    }
+ 
 
 #if REGENBRAKING == 1
     /* TODO: REGEN? */
@@ -652,55 +674,65 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
     /* find first empty mailbox */
     int j = (CAN->TSR & CAN_TSR_CODE_Msk) >> CAN_TSR_CODE_Pos;
-
+    
+    /* set dlc to length */
     CAN->sTxMailBox[j].TDTR = length;
+
+    /* clears data high/low registers */
     CAN->sTxMailBox[j].TDLR = 0;
     CAN->sTxMailBox[j].TDHR = 0;
-    for(int i = 0; i < length && i < 4; i++)
+    
+    /* writes to high/low registers */
+    for(int i = 0; i < length && i < 4; i++) 
         CAN->sTxMailBox[j].TDLR |= ((data[i] & 0xFF) << i * 8);
     for(int i = 0; i < length - 4; i++)
         CAN->sTxMailBox[j].TDHR |= ((data[i+4] & 0xFF) << i * 8);
+   
+    /* writes id and queues message */
     CAN->sTxMailBox[j].TIR = (uint32_t)((id << CAN_TI0R_STID_Pos) | CAN_TI0R_TXRQ);
 }
 
 void recieve_CAN(){
-    while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) {
+    /* while mailboxes aren't empty */
+    while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) { 
         uint8_t  can_len    = CAN->sFIFOMailBox[0].RDTR & 0xF;
         uint64_t can_data   = CAN->sFIFOMailBox[0].RDLR 
             + ((uint64_t)CAN->sFIFOMailBox[0].RDHR << 32);
         uint16_t can_id     = CAN->sFIFOMailBox[0].RIR >> CAN_RI0R_STID_Pos;
         CAN->RF0R |= CAN_RF0R_RFOM0; /* release mailbox */
 
-        CAN_msg canrx = {can_id, can_len, can_data};
-        process_CAN(canrx);
+        process_CAN(can_id, can_len, can_data);
     }
 }
 
-void process_CAN(CAN_msg cm){
-    switch (cm.id){
+void process_CAN(uint16_t id, uint8_t length, uint64_t data){
+
+    (void)(length);
+
+    switch (id){
         case MC_CANID_HIGHSPEEDMESSAGE:
-            car_state.hsmessage.bits = cm.data;
+            car_state.hsmessage.bits = data;
             break;
         case VCU_CANID_ACCEL:
-            car_state.acceleration.bits = cm.data;
+            car_state.acceleration.bits = data;
             break;
         case VCU_CANID_WHEELSPEED:
-            car_state.wheelspeed.bits = cm.data;
+            car_state.wheelspeed.bits = data;
             break;
         case MC_CANID_FAULTCODES:
-            car_state.faults.bits = cm.data;
+            car_state.faults.bits = data;
             break;
         case MC_CANID_VOLTAGEINFO:
-            car_state.voltageinfo.bits = cm.data;
+            car_state.voltageinfo.bits = data;
             break;
         case MC_CANID_INTERNALSTATES:
-            car_state.mcstate.bits = cm.data;
+            car_state.mcstate.bits = data;
             break;
         case VCU_CANID_REPROGRAMAPPS:
-            reprogramAPPS(*(VCU_ReprogramApps *)&cm.data);
+            reprogramAPPS(*(VCU_ReprogramApps *)&data);
             break;
         case VCU_CANID_REPROGRAMCONTROL:
-            reprogramControl(*(VCU_ReprogramControl *)&cm.data);
+            reprogramControl(*(VCU_ReprogramControl *)&data);
             break;
         case VCU_CANID_REVEAL_VALS:
             send_CAN(VCU_CANID_APPS_VALS, 8, (uint8_t *)&config.calibration);
