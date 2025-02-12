@@ -163,28 +163,77 @@ extern void * memcpy(void *dest, const void *src, unsigned int n)
     return (dest);
 }
 
-uint32_t clz(uint32_t i){
+extern uint32_t clz(uint32_t i){
     uint32_t j = 0, n = i;
     while((n = n >> 1)) j++;
-    return j;
+    return 31 - j;
 }
 
-//shit function lol
+//shit function lol (decommissioned but still in our hearts)
+/*
 extern uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v){
     uint32_t div = u;
     while(div > v) div -= v;
     return div;
 }
+*/ 
+
+void udivide(uint32_t* quotient, uint32_t *remainder, uint32_t u, uint32_t v){
+    uint32_t q = 0;
+    uint32_t k = clz(v) - clz(u);
+
+    switch (k) {
+        case 31: if (v <= (u >> 31)) { u -= v << 31; q += 1 << 31; }
+        case 30: if (v <= (u >> 30)) { u -= v << 30; q += 1 << 30; }
+        case 29: if (v <= (u >> 29)) { u -= v << 29; q += 1 << 29; }
+        case 28: if (v <= (u >> 28)) { u -= v << 28; q += 1 << 28; }
+        case 27: if (v <= (u >> 27)) { u -= v << 27; q += 1 << 27; }
+        case 26: if (v <= (u >> 26)) { u -= v << 26; q += 1 << 26; }
+        case 25: if (v <= (u >> 25)) { u -= v << 25; q += 1 << 25; }
+        case 24: if (v <= (u >> 24)) { u -= v << 24; q += 1 << 24; }
+        case 23: if (v <= (u >> 23)) { u -= v << 23; q += 1 << 23; }
+        case 22: if (v <= (u >> 22)) { u -= v << 22; q += 1 << 22; }
+        case 21: if (v <= (u >> 21)) { u -= v << 21; q += 1 << 21; }
+        case 20: if (v <= (u >> 20)) { u -= v << 20; q += 1 << 20; }
+        case 19: if (v <= (u >> 19)) { u -= v << 19; q += 1 << 19; }
+        case 18: if (v <= (u >> 18)) { u -= v << 18; q += 1 << 18; }
+        case 17: if (v <= (u >> 17)) { u -= v << 17; q += 1 << 17; }
+        case 16: if (v <= (u >> 16)) { u -= v << 16; q += 1 << 16; }
+        case 15: if (v <= (u >> 15)) { u -= v << 15; q += 1 << 15; }
+        case 14: if (v <= (u >> 14)) { u -= v << 14; q += 1 << 14; }
+        case 13: if (v <= (u >> 13)) { u -= v << 13; q += 1 << 13; }
+        case 12: if (v <= (u >> 12)) { u -= v << 12; q += 1 << 12; }
+        case 11: if (v <= (u >> 11)) { u -= v << 11; q += 1 << 11; }
+        case 10: if (v <= (u >> 10)) { u -= v << 10; q += 1 << 10; }
+        case  9: if (v <= (u >>  9)) { u -= v <<  9; q += 1 <<  9; }
+        case  8: if (v <= (u >>  8)) { u -= v <<  8; q += 1 <<  8; }
+        case  7: if (v <= (u >>  7)) { u -= v <<  7; q += 1 <<  7; }
+        case  6: if (v <= (u >>  6)) { u -= v <<  6; q += 1 <<  6; }
+        case  5: if (v <= (u >>  5)) { u -= v <<  5; q += 1 <<  5; }
+        case  4: if (v <= (u >>  4)) { u -= v <<  4; q += 1 <<  4; }
+        case  3: if (v <= (u >>  3)) { u -= v <<  3; q += 1 <<  3; }
+        case  2: if (v <= (u >>  2)) { u -= v <<  2; q += 1 <<  2; }
+        case  1: if (v <= (u >>  1)) { u -= v <<  1; q += 1 <<  1; }
+        case  0: if (v <= (u >>  0)) { u -= v <<  0; q += 1 <<  0; }
+        default: break;
+    }
+
+    if (*quotient != 0) *quotient = q;
+    if (*remainder != 0) *remainder = u;
+}
+
+extern uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v) {
+    uint32_t r = 0;
+
+    udivide(0, &r, u, v);
+
+    return r;
+}
 
 extern uint32_t __aeabi_uidiv(uint32_t u, uint32_t v) {
-    uint32_t q = 0, k = clz(u) - clz(v);
-    v = v << k;
-    k = 1 << k;
-    do {
-        if(v >= u) continue;
-        u -= v;
-        q += k;
-    }
-    while(v = v >> 1, (k = k >> 1));
+    uint32_t q = 0;
+
+    udivide(&q, 0, u, v);
+
     return q;
 }
