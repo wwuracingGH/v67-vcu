@@ -611,7 +611,9 @@ int GetTCMax(){
 /* returns 1 if there's an issue */
 int APPS_calc(uint16_t *torque, uint16_t lastFault){
     static uint8_t faultCounter = 0;
-    const uint32_t maxFaultCount = 20; //(100 / controlPeriod) - 1; /* 100ms */
+    const uint32_t maxFaultCount = ((uint32_t)100 / controlPeriod) - 1; /* 100ms */
+    const uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / maxFaultCount) * 2;
+    const uint32_t faultMinToSub = maxFaultCount / 2;
 
     uint16_t fault = 0, t_req = 0;
     
@@ -654,8 +656,8 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
         t_req = 0; 
     }
     else {
-        if (faultCounter > maxFaultCount - 10)
-            t_req = car_state.torque_req - 240; /* gradual decrease to ensure no resolver faults */
+        if (faultCounter >= faultMinToSub)
+            t_req = car_state.torque_req - faultSubtraction; /* gradual decrease to ensure no resolver faults */
         else 
             t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
     }
