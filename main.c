@@ -348,7 +348,8 @@ void RTD_start(){
     send_CAN(MC_CANID_COMMAND, 8, (uint8_t *)&canmsg);
     GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
-    RTOS_scheduleEvent(__turn_that_buzzer_the_fuck_off, 1500);
+    for(int i = 0; i < 500000; i++);
+    __turn_that_buzzer_the_fuck_off();
 }
 
 void MCWatchdog(){
