@@ -29,7 +29,7 @@
  */
 #define TRACTIONCONTROL     0 /* does nothing rn */
 #define REGENBRAKING        0 /* does nothing rn */
-#define MC_RESET_BITMASK    0x00000400
+#define MC_RESET_BITMASK    0x00E0 /* all precharge/undervoltage faults */
 
 /*
  * HELPER FUNCTIONS
@@ -244,14 +244,13 @@ int main(){
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
     RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
-
-    RTOS_scheduleTask(car_state.state_idle, MCWatchdog, 1000); /* Every one second */
-    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 1000); /* Every one second */
     
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
+
+    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 500); /* Every half second */
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
@@ -286,6 +285,8 @@ void flash_Init(){
 }
 
 void Control() {
+    uint8_t f = areThereFaults();
+    send_CAN(0, 1, &f);
     APPS_RollingSmooth();
     car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
@@ -298,13 +299,13 @@ void InputIdle(){
         if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
             && !areThereFaults())
         {
-            if (car_state.mcstate.is.inverterState != 4) return;
+            //if (car_state.mcstate.is.vsmState != 4) return;
             
             RTOS_switchState(car_state.state_rtd);
 
-            while(car_state.mcstate.is.inverterState == 5) recieve_CAN();
+            //while(car_state.mcstate.is.vsmState == 5) recieve_CAN();
 
-            if(car_state.mcstate.is.inverterState != 6) RTOS_switchState(car_state.state_idle);
+            //if(car_state.mcstate.is.vsmState != 6) RTOS_switchState(car_state.state_idle);
         }
         else if (areThereFaults()) {
             MCWatchdog();
@@ -313,7 +314,6 @@ void InputIdle(){
 }
 
 void InputRTD(){
-
 
 }
 
@@ -327,20 +327,21 @@ void send_Diagnostics(){
         RTOS_inState(car_state.state_idle),
         RTOS_inState(car_state.state_rtd)
     };
+    for(int i = 0; i < 4000; i++);
     send_CAN(VCU_CANID_STATE, 2, statemsg);
 }
 
-void __turn_that_buzzer_the_fuck_off(){
+void turnBuzzerOff(){
     BUZZEROFF(); /* turns that buzzer the fuck off */
 }
 
 int areThereFaults(){
-    return !!( car_state.faults.fc.runtimeErrors & MC_RESET_BITMASK);
+    return !!( car_state.faults.fc.postErrors & MC_RESET_BITMASK);
 }
 
 void Idle_start(){
     canmsg.inverterEnable = 0;
-    GPIOA->ODR |= 1 << 9;
+    GPIOA->ODR &= ~(1 << 9);
 }
 
 void RTD_start(){
@@ -349,14 +350,14 @@ void RTD_start(){
     GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
     for(int i = 0; i < 500000; i++);
-    __turn_that_buzzer_the_fuck_off();
+    turnBuzzerOff();
 }
 
 void MCWatchdog(){
-    if(areThereFaults()){
-        if(RTOS_inState(car_state.state_rtd)){
-            RTOS_switchState(car_state.state_idle);
-        }
+    send_CAN(0xD0, 4, (uint8_t * )&car_state.state_idle);
+    if(car_state.faults.bits > 0 || car_state.mcstate.is.vsmState > 6){
+        
+        RTOS_switchState(car_state.state_idle);
         
         /* waits until discharge is complete */
         while(car_state.voltageinfo.vi.dcBusVoltage > 20); 
@@ -613,8 +614,13 @@ int GetTCMax(){
 int APPS_calc(uint16_t *torque, uint16_t lastFault){
     static uint8_t faultCounter = 0;
     const uint32_t maxFaultCount = ((uint32_t)100 / controlPeriod) - 1; /* 100ms */
-    const uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / maxFaultCount) * 2;
     const uint32_t faultMinToSub = maxFaultCount / 2;
+
+    uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / (maxFaultCount + 1)) * 2;
+
+    uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction};
+
+    //send_CAN(0, 8, (uint8_t*)faultdat);
 
     uint16_t fault = 0, t_req = 0;
     
@@ -646,14 +652,14 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     else
         faultCounter = 0;
 
-    if (fault != 0) faultCounter++;
+    if (fault != 0 && faultCounter <= maxFaultCount) faultCounter++;
 
     car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
     car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
     car_state.APPSCalib.torque = (uint16_t)t_req;
     car_state.APPSCalib.fault  = (uint16_t)fault;
 
-    if (faultCounter > maxFaultCount || RTOS_inState(car_state.state_idle)){
+    if (faultCounter >= maxFaultCount || RTOS_inState(car_state.state_idle)){
         t_req = 0; 
     }
     else {
