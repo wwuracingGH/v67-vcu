@@ -163,10 +163,20 @@ extern void * memcpy(void *dest, const void *src, unsigned int n)
     return (dest);
 }
 
-extern uint32_t clz(uint32_t i){
-    uint32_t j = 0, n = i;
-    while((n = n >> 1)) j++;
-    return 31 - j;
+extern uint32_t clz(uint32_t x)
+{
+    if (!x) return 32;
+    static const uint8_t debruijn32[32] = {
+        0, 31, 9, 30, 3, 8, 13, 29, 2, 5, 7, 21, 12, 24, 28, 19,
+        1, 10, 4, 14, 6, 22, 25, 20, 11, 15, 23, 26, 16, 27, 17, 18
+    };
+    x |= x>>1;
+    x |= x>>2;
+    x |= x>>4;
+    x |= x>>8;
+    x |= x>>16;
+    x++;
+    return debruijn32[x*0x076be629>>27];
 }
 
 //shit function lol (decommissioned but still in our hearts)
@@ -218,8 +228,8 @@ void udivide(uint32_t* quotient, uint32_t *remainder, uint32_t u, uint32_t v){
         default: break;
     }
 
-    if (*quotient != 0) *quotient = q;
-    if (*remainder != 0) *remainder = u;
+    if (quotient != 0) *quotient = q;
+    if (remainder != 0) *remainder = u;
 }
 
 extern uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v) {

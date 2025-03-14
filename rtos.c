@@ -93,35 +93,32 @@ extern int RTOS_scheduleTask(uint8_t state, void (*function)(), uint16_t period)
  * schedules an event with a countdown, returns index in the linked list heap
  */
 extern int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
-    int pointer = 0;
-    while(rtos_scheduler.eventHeap[pointer].callback == 0)
-        pointer++;
-
-    rtos_scheduler.eventHeap[pointer].callback = function;
-    rtos_scheduler.eventHeap[pointer].countdown = countdown;
+    int newEventHandle = 0;
+    while(rtos_scheduler.eventHeap[newEventHandle].callback != 0 && newEventHandle < RTOS_maxEventNum)
+        newEventHandle++;
     
+    if (newEventHandle == RTOS_maxEventNum) return -1;
+
+    rtos_scheduler.eventHeap[newEventHandle].callback = function;
+    rtos_scheduler.eventHeap[newEventHandle].countdown = countdown;
+
+    if(rtos_scheduler.firstEventIndex == -1){
+        rtos_scheduler.firstEventIndex = newEventHandle;
+        return newEventHandle;
+    }
+
     int index = rtos_scheduler.firstEventIndex;
-    int lastIndex = -1;
-    int firstevent = -1;
 
     while(rtos_scheduler.eventHeap[index].nextEvent != -1){
-        if(index == -1) break;
-        if(rtos_scheduler.eventHeap[index].countdown > countdown) break;
+        if(rtos_scheduler.eventHeap[rtos_scheduler.eventHeap[index].nextEvent].countdown > countdown) break;
 
-        firstevent = 0;
-        lastIndex = index;
         index = rtos_scheduler.eventHeap[index].nextEvent;
     }
 
-    if(!firstevent){
-        rtos_scheduler.eventHeap[lastIndex].nextEvent = pointer; 
-    }
-    else rtos_scheduler.firstEventIndex = pointer;
+    rtos_scheduler.eventHeap[index].nextEvent = newEventHandle;
+    rtos_scheduler.eventHeap[newEventHandle].nextEvent = rtos_scheduler.eventHeap[index].nextEvent;
 
-    if(index != -1)
-        rtos_scheduler.eventHeap[pointer].nextEvent = index;
-
-    return pointer;
+    return newEventHandle;
 }
 
 /**
@@ -135,7 +132,7 @@ extern int RTOS_removeFirstEvent(){
     
     rtos_scheduler.firstEventIndex = newFirst;
 
-    return rtos_scheduler.firstEventIndex;
+    return rtos_scheduler.firstEventIndex == -1;
 }
 
 /**
@@ -161,7 +158,6 @@ extern int RTOS_Update(){
         rtos_scheduler.eventQue |= (1 << eventpointer);
         eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;
     }
-
     while (eventpointer != -1){
         rtos_scheduler.eventHeap[eventpointer].countdown--;
         eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;
@@ -181,7 +177,7 @@ extern int RTOS_ExecuteTasks(){
         }
     }
 
-    for(int i = 0; i != -1;){
+    for(int i = rtos_scheduler.firstEventIndex; i != -1;){
         if ((rtos_scheduler.eventQue) >> i & 0x1){
             rtos_scheduler.tasks[i].callback();
             i = rtos_scheduler.eventHeap[i].nextEvent;
