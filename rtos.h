@@ -26,7 +26,7 @@ typedef struct {
 
 typedef struct {
     uint16_t eventQue;
-    int firstEventIndex;
+    int8_t firstEventIndex;
     rtos_event eventHeap[RTOS_maxEventNum];
 
     uint64_t taskQue; 

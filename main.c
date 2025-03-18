@@ -27,9 +27,23 @@
 /*
  * EXTRA BEHAVIOR - 0 or 1
  */
-#define TRACTIONCONTROL     0 /* does nothing rn */
-#define REGENBRAKING        0 /* does nothing rn */
-#define MC_RESET_BITMASK    0x00E0 /* all precharge/undervoltage faults */
+#define TRACTIONCONTROL_ENABLED     0 /* does nothing rn */
+#define REGENBRAKING_ENABLED        0 /* does nothing rn */
+#define MC_WATCHDOG_ENABLED         1 /* babysitting for motor controller */
+
+/*
+ * RESETABLE FAULTS
+ *
+ * these are the faults that are checked for in the mc watchdog 
+ */
+#define MC_RESET_BITMASK    ( \
+                            MC_PFAULT_PRECHARGE_FAILURE | \ 
+                            MC_PFAULT_PRECHARGE_TIMEOUT | \
+                            MC_PFAULT_DC_BUS_VOLT_LOW   | \
+                            \
+                            MC_RFAULT_CAN_COMMAND_LOST  | \
+                            MC_RFAULT_RESOLVER_DISCONNECTED \
+                            ) \
 
 /*
  * HELPER FUNCTIONS
@@ -43,8 +57,8 @@
  * I HAVE NO IDEA HOW THE MOSFET WORKS
  */
 
-#define BUZZERON()              (GPIOB->ODR |= GPIO_ODR_5)
-#define BUZZEROFF()             (GPIOB->ODR &= ~GPIO_ODR_5)
+void BUZZERON() { GPIOB->ODR |= GPIO_ODR_5;  }
+void BUZZEROFF(){ GPIOB->ODR &= ~GPIO_ODR_5; }
 
 /*
  * APPS CALC PARAMETERS
@@ -121,7 +135,9 @@ const uint16_t controlPeriod = 5,
                inputPeriod = 50,
                recievePeriod = 20,
                diagPeriod = 100,
-               canWDPeriod = 2500;
+               MCWDPeriod = 999;
+
+const uint16_t buzzerDuration = 500;
 
 /* 
  * helper 
@@ -207,6 +223,7 @@ void RTD_start();
 void Idle_start();
 
 int areThereFaults();
+int areThereResetableFaults();
 
 void reprogram(_settings nc);
 void reprogramAPPS(VCU_ReprogramApps ra);
@@ -244,13 +261,16 @@ int main(){
     RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
     RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
-    
+   
+
     RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
     RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
     RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
     RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
 
-    RTOS_scheduleTask(car_state.state_rtd,  MCWatchdog, 500); /* Every half second */
+    RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, MCWDPeriod);
+#if MC_WATCHDOG_ENABLED == 1
+#endif
 
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
     CAN_Init();
@@ -285,7 +305,7 @@ void flash_Init(){
 }
 
 void Control() {
-    uint8_t f = areThereFaults();
+    uint8_t f = areThereResetableFaults();
     send_CAN(0, 1, &f);
     APPS_RollingSmooth();
     car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
@@ -297,15 +317,23 @@ void Control() {
 void InputIdle(){
     if(!(GPIOB->IDR & GPIO_IDR_1)){
         if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
-            && !areThereFaults())
+            /* && !areThereFaults() */ )
         {
             //if (car_state.mcstate.is.vsmState != 4) return;
             
             RTOS_switchState(car_state.state_rtd);
 
-            //while(car_state.mcstate.is.vsmState == 5) recieve_CAN();
+            //while(car_state.mcstate.is.vsmState == 5 || car_state.mcstate.is.vsmState == 4) recieve_CAN();
 
-            //if(car_state.mcstate.is.vsmState != 6) RTOS_switchState(car_state.state_idle);
+            for(int i = 0; i < 10000; i++);
+
+            if(car_state.mcstate.is.vsmState != 6) {
+                RTOS_switchState(car_state.state_idle);
+                //BUZZEROFF();
+                /* chirps buzzer */
+                //RTOS_scheduleEvent(BUZZERON, 200);
+                //RTOS_scheduleEvent(BUZZEROFF, 500);
+            }
         }
         else if (areThereFaults()) {
             MCWatchdog();
@@ -327,16 +355,15 @@ void send_Diagnostics(){
         RTOS_inState(car_state.state_idle),
         RTOS_inState(car_state.state_rtd)
     };
-    for(int i = 0; i < 4000; i++);
     send_CAN(VCU_CANID_STATE, 2, statemsg);
 }
 
-void turnBuzzerOff(){
-    BUZZEROFF(); /* turns that buzzer the fuck off */
+int areThereResetableFaults(){
+    return ( car_state.faults.fc.postErrors & MC_RESET_BITMASK) || (car_state.faults.fc.runtimeErrors & (MC_RESET_BITMASK >> 32));
 }
 
 int areThereFaults(){
-    return !!( car_state.faults.fc.postErrors & MC_RESET_BITMASK);
+    return car_state.faults.fc.postErrors || car_state.faults.fc.runtimeErrors || car_state.mcstate.is.vsmState > 6;
 }
 
 void Idle_start(){
@@ -349,20 +376,22 @@ void RTD_start(){
     send_CAN(MC_CANID_COMMAND, 8, (uint8_t *)&canmsg);
     GPIOA->ODR |= 1 << 9;
     canmsg.inverterEnable = 1;
-    for(int i = 0; i < 500000; i++);
-    turnBuzzerOff();
+    RTOS_scheduleEvent(BUZZEROFF, buzzerDuration);
 }
 
 void MCWatchdog(){
-    send_CAN(0xD0, 4, (uint8_t * )&car_state.state_idle);
-    if(car_state.faults.bits > 0 || car_state.mcstate.is.vsmState > 6){
-        
+    if(areThereFaults()){
         RTOS_switchState(car_state.state_idle);
+        uint64_t i = MC_RESET_BITMASK;
+        send_CAN(0xD0, 8, (uint8_t*)&i);
+        i = car_state.faults.fc.postErrors + ((uint64_t)car_state.faults.fc.runtimeErrors << 32);
+        send_CAN(0xD1, 8, (uint8_t*)&i);
         
-        /* waits until discharge is complete */
-        while(car_state.voltageinfo.vi.dcBusVoltage > 20); 
-
-        send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
+        if(areThereResetableFaults()){
+            /* waits until discharge is complete */
+            //while(car_state.voltageinfo.vi.dcBusVoltage > 20); 
+            send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
+        }
     } 
 }
 
@@ -585,7 +614,7 @@ void APPS_RollingSmooth(){
 }
 
 int GetTCMax(){
-#if TRACTIONCONTROL == 1
+#if TRACTIONCONTROL_ENABLED == 1
     const float mass_KG = 240;
     const float rearAxel_Moment = 0.78f;
     const float gravity = 9.81f;
@@ -670,7 +699,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     }
  
 
-#if REGENBRAKING == 1
+#if REGENBRAKING_ENABLED == 1
     /* TODO: REGEN? */
 #endif 
     
@@ -681,6 +710,9 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 }
 
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
+    /* all mailboxes full */
+    while(!(CAN->TSR & CAN_TSR_TME_Msk));
+
     /* find first empty mailbox */
     int j = (CAN->TSR & CAN_TSR_CODE_Msk) >> CAN_TSR_CODE_Pos;
     
@@ -712,6 +744,10 @@ void recieve_CAN(){
 
         process_CAN(can_id, can_len, can_data);
     }
+
+    uint16_t i[] = { rtos_scheduler.firstEventIndex, rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].countdown };
+    if(rtos_scheduler.firstEventIndex != -1) 
+        send_CAN(0xD2, 4, (uint8_t*)i);
 }
 
 void process_CAN(uint16_t id, uint8_t length, uint64_t data){

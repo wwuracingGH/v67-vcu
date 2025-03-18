@@ -101,7 +101,8 @@ extern int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
 
     rtos_scheduler.eventHeap[newEventHandle].callback = function;
     rtos_scheduler.eventHeap[newEventHandle].countdown = countdown;
-
+    rtos_scheduler.eventHeap[newEventHandle].nextEvent = -1;
+    
     if(rtos_scheduler.firstEventIndex == -1){
         rtos_scheduler.firstEventIndex = newEventHandle;
         return newEventHandle;
@@ -152,7 +153,7 @@ extern int RTOS_Update(){
 
     int eventpointer = rtos_scheduler.firstEventIndex;
     while (eventpointer != -1){
-        if (rtos_scheduler.eventHeap[eventpointer].countdown > 0)
+        if (rtos_scheduler.eventHeap[eventpointer].countdown > 0 || rtos_scheduler.eventHeap[eventpointer].callback == 0)
             break; //move on if no events to execute
         
         rtos_scheduler.eventQue |= (1 << eventpointer);
@@ -177,10 +178,10 @@ extern int RTOS_ExecuteTasks(){
         }
     }
 
-    for(int i = rtos_scheduler.firstEventIndex; i != -1;){
-        if ((rtos_scheduler.eventQue) >> i & 0x1){
-            rtos_scheduler.tasks[i].callback();
-            i = rtos_scheduler.eventHeap[i].nextEvent;
+    for(int i = 0; i < RTOS_maxEventNum; i++){
+        if ((rtos_scheduler.eventQue >> i) & 0x1){
+            rtos_scheduler.eventHeap[i].callback();
+            rtos_scheduler.eventQue &= ~(0x1 << i);
             RTOS_removeFirstEvent();
         }
         else break;
