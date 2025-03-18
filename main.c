@@ -15,7 +15,12 @@
 #include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
 #include "canDefinitions.h"
 #include "vendor/qfplib/qfplib.h"
-#include "rtos.h"
+
+#define RTOS_maxTaskNum 16
+#define RTOS_maxEventNum 8
+#define RTOS_maxStateNum 8
+#include "llrttsos.h"
+_RTOS_IMPLEMENTATION_
 
 /*
  * ADC PARAMETERS 
@@ -135,7 +140,7 @@ const uint16_t controlPeriod = 5,
                inputPeriod = 50,
                recievePeriod = 20,
                diagPeriod = 100,
-               MCWDPeriod = 999;
+               MCWDPeriod = 199;
 
 const uint16_t buzzerDuration = 500;
 
@@ -153,10 +158,13 @@ struct __attribute__((packed)) {
 
 uint16_t ADC_RollingValues[ROLLING_ADC_VALS];
 
+#define BUTTONMASK_RTD (1 << 0)
+
 struct {
     int state_idle, state_rtd;
     volatile uint16_t torque_req;
     uint16_t lastAPPSFault;
+    uint8_t ButtonMask;
     uint8_t MCResetAttempts; /* number of resets until it stops */
     struct{
         uint16_t apps1, apps2, torque, fault;
@@ -236,8 +244,6 @@ MC_ParameterCommand torqueLimitMsg = { 129, 1, 0, COMPILED_MAX_TORQUE_REQ, 0 };
 MC_ParameterCommand fastMsg = {227, 1, 0, 0xFFFE, 0}; /* TODO: verify */
 MC_ParameterCommand shutup = { 148, 1, 0, 0b0001110011100111, 0xFFFF};
 
-kernel rtos_scheduler = {0, -1, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}, 0, 0, {{0, 0, 0}}}; 
-
 int main(){
     /* setup */
     clock_init();
@@ -269,6 +275,7 @@ int main(){
     RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
 
     RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, MCWDPeriod);
+
 #if MC_WATCHDOG_ENABLED == 1
 #endif
 
@@ -315,29 +322,32 @@ void Control() {
 }
 
 void InputIdle(){
-    if(!(GPIOB->IDR & GPIO_IDR_1)){
+    if(!(GPIOB->IDR & GPIO_IDR_1) && !(car_state.ButtonMask & BUTTONMASK_RTD)){
+        car_state.ButtonMask |= BUTTONMASK_RTD;
         if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
-            /* && !areThereFaults() */ )
+             && !areThereFaults() )
         {
-            //if (car_state.mcstate.is.vsmState != 4) return;
+            if (car_state.mcstate.is.vsmState != 4) return;
             
             RTOS_switchState(car_state.state_rtd);
 
-            //while(car_state.mcstate.is.vsmState == 5 || car_state.mcstate.is.vsmState == 4) recieve_CAN();
-
-            for(int i = 0; i < 10000; i++);
+            while(car_state.mcstate.is.vsmState == 5 || car_state.mcstate.is.vsmState == 4) recieve_CAN();
 
             if(car_state.mcstate.is.vsmState != 6) {
                 RTOS_switchState(car_state.state_idle);
-                //BUZZEROFF();
+                BUZZEROFF();
+                RTOS_removeFirstEvent();
                 /* chirps buzzer */
-                //RTOS_scheduleEvent(BUZZERON, 200);
-                //RTOS_scheduleEvent(BUZZEROFF, 500);
+                RTOS_scheduleEvent(BUZZERON, 150);
+                RTOS_scheduleEvent(BUZZEROFF, 200);
             }
         }
         else if (areThereFaults()) {
             MCWatchdog();
         }
+    }
+    else if (GPIOB->IDR & GPIO_IDR_1){
+        car_state.ButtonMask &= ~BUTTONMASK_RTD;
     }
 }
 
@@ -382,14 +392,9 @@ void RTD_start(){
 void MCWatchdog(){
     if(areThereFaults()){
         RTOS_switchState(car_state.state_idle);
-        uint64_t i = MC_RESET_BITMASK;
-        send_CAN(0xD0, 8, (uint8_t*)&i);
-        i = car_state.faults.fc.postErrors + ((uint64_t)car_state.faults.fc.runtimeErrors << 32);
-        send_CAN(0xD1, 8, (uint8_t*)&i);
-        
         if(areThereResetableFaults()){
-            /* waits until discharge is complete */
-            //while(car_state.voltageinfo.vi.dcBusVoltage > 20); 
+            /* waits until discharge is complete*/
+            while(car_state.voltageinfo.vi.dcBusVoltage > 40);
             send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
         }
     } 
@@ -744,10 +749,6 @@ void recieve_CAN(){
 
         process_CAN(can_id, can_len, can_data);
     }
-
-    uint16_t i[] = { rtos_scheduler.firstEventIndex, rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].countdown };
-    if(rtos_scheduler.firstEventIndex != -1) 
-        send_CAN(0xD2, 4, (uint8_t*)i);
 }
 
 void process_CAN(uint16_t id, uint8_t length, uint64_t data){

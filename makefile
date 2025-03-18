@@ -11,12 +11,8 @@ BINARY = v66vcu.elf
 
 all: $(BINARY) clean
 
-$(BINARY): rtos.o main.o startup.o system_stm32f0xx.o vendor/qfplib/qfplib.s 
+$(BINARY): main.o startup.o system_stm32f0xx.o vendor/qfplib/qfplib.s 
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY)
-
-
-rtos.o: rtos.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) rtos.c -c
 
 main.o: main.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) main.c -c
