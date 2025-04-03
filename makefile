@@ -7,15 +7,15 @@ CPPFLAGS= -DSTM32F042x6 -Ivendor/CMSIS/Device/ST/STM32F0/Include \
 LINKER_FILE=linker_script.ld
 LDFLAGS=-T $(LINKER_FILE)
 
-BINARY = v66vcu.elf
+BINARY = v67vcu.elf
 
 all: $(BINARY) clean
 
-$(BINARY): main.o startup.o system_stm32f0xx.o vendor/qfplib/qfplib.s 
+$(BINARY): blinky_test.o startup.o system_stm32f0xx.o vendor/qfplib/qfplib.s 
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY)
 
-main.o: main.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) main.c -c
+blinky_test.o: blinky_test.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) blinky_test.c -c
 
 startup.o: startup.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) startup.c -c

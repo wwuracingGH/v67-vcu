@@ -9,10 +9,10 @@
  */
 
 #include <stdint.h>
-#ifndef STM32F042x6
-#define STM32F042x6
+#ifndef STM32H533xx
+#define STM32H533xx
 #endif
-#include "vendor/CMSIS/Device/ST/STM32F0/Include/stm32f0xx.h"
+#include "vendor/CMSIS/Device/ST/STM32H5/Include/stm32h5xx.h"
 #include "canDefinitions.h"
 #include "vendor/qfplib/qfplib.h"
 
