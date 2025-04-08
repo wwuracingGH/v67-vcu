@@ -20,7 +20,7 @@
 #define RTOS_maxEventNum 8
 #define RTOS_maxStateNum 8
 #include "llrttsos.h"
-_RTOS_IMPLEMENTATION_
+_RTOS_IMPLEMENTATION_ /* Macro that contains the struct for the OS */
 
 /*
  * ADC PARAMETERS 
@@ -256,7 +256,7 @@ int main(){
 
     GPIO_Init(); /* must be called first */
  
-    BUZZEROFF(); /* turns that buzzer the fuck off */
+    BUZZEROFF(); /* turns that buzzer off */
     
     RTOS_init();
 
@@ -303,11 +303,15 @@ void systick_handler(){
 }
 
 void flash_Init(){
-    while ((FLASH->SR & FLASH_SR_BSY) != 0);
+    /* TODO (URGENT): enable 6 bit ecc region (Important!!! DO THIS FIRST!!! THAT MEANS YOU!!! RIGHT NOW!!!) */
 
+    while ((FLASH->NSSR & FLASH_SR_BSY) != 0); /* waits for it to not be busy */
+
+    /* TODO: figure out how to disable memory lockout fully */
     if ((FLASH->CR & FLASH_CR_LOCK) != 0) {
-        FLASH->KEYR = (uint32_t)0x45670123;
-        FLASH->KEYR = (uint32_t)0xCDEF89AB;
+        /* These are both correct but you might also need to do something else */
+        FLASH->NSKEYR = (uint32_t)0x45670123;
+        FLASH->NSKEYR = (uint32_t)0xCDEF89AB;
     }
 }
 
@@ -351,6 +355,7 @@ void InputIdle(){
     }
 }
 
+/* processes input while car is in RTD, like when switching modes */
 void InputRTD(){
 
 }
@@ -400,32 +405,30 @@ void MCWatchdog(){
     } 
 }
 
-/* incredible code right here */
+/*  */
 void reprogram(_settings newConfig) {
    
     uint32_t configptr = (uint32_t)&config; 
-    
-    /* 0x007C0008 */
-    /* 0x00008000 */
-    send_CAN(0x12, 4, (uint8_t *)&configptr);
 
-    if (configptr < 0x08007C00 || configptr >= 0x08008000 - sizeof(config)) return;
-    
-    GPIOB->ODR &= ~(1 << 6);
-    for(int i = 0; i < 10000; i++);
-    GPIOB->ODR |= (1 << 6);
-
+    if (configptr < 0x0900C000 || configptr >= 0x09017FFF - sizeof(config)) {
+        /* TODO: better way to error out of here */
+        default_handler();
+        return;
+    }
+   
+    /* TODO: rewrite this function so it works with the H5 flash peripheral, 
+     * they're pretty similar but its called like "unsafe control register or something" 
+     * I think this code currently only erases one page so you're going to need to fix that */
     FLASH->CR |= FLASH_CR_PER; /* enable page erase */
-    FLASH->AR = 0x08007C00; /*  start at the 31st page */
+    FLASH->AR = 0x0900C000; /*  start at the 7th page ig? this adress is correct */
     FLASH->CR |= FLASH_CR_STRT; /* start erasing */
     while ((FLASH->SR & FLASH_SR_BSY) != 0); /* wait until it's done */
     if ((FLASH->SR & FLASH_SR_EOP) != 0) /* clear the eop bit */
     {
-        FLASH->SR = FLASH_SR_EOP;
+        FLASH->SR |= FLASH_SR_EOP;
     }
     
     FLASH->CR &= ~FLASH_CR_PER; /* Turn off page erase */
-
 
     FLASH->CR |= FLASH_CR_PG;
     for(uint32_t i = 0; i < sizeof(newConfig)/2; i++){
@@ -436,7 +439,6 @@ void reprogram(_settings newConfig) {
     FLASH->CR &= FLASH_CR_PG;
 
     NVIC_SystemReset();
-     
 }
 
 void reprogramAPPS(VCU_ReprogramApps ra){
@@ -479,24 +481,33 @@ void reprogramControl(VCU_ReprogramControl rc){
     reprogram(newConfig); 
 }
 
-void clock_init() /* turns on hsi48 and sets as system clock */
-{
-    /* wait one clock cycle before accessing flash memory @48MHZ */
-    FLASH->ACR |= 0b001 << FLASH_ACR_LATENCY_Pos;
+void clock_init() { /* turns up the speed to 250mhz */
+    /* use voltage scaling profile 0 */
+    PWR->VOSCR |= (0b11 << PWR_VOSCR_VOS_Pos); 
+    /* change the flash access latency */
+    FLASH->ACR |= FLASH_ACR_LATENCY_6WS;
+    /* change the flash delay */
+    FLASH->ACR |= 2 << FLASH_ACR_WRHIGHFREQ_Pos;
 
-    /* Enables HSI48 oscillator */
-    RCC->CR2  |= RCC_CR2_HSI48ON;
-    while (!(RCC->CR2 & RCC_CR2_HSI48RDY));
-    
-    /* no peripheral prescaler div or hsi prescaler div */
-    RCC->CFGR &= ~(0b111 << RCC_CFGR_PPRE_Pos);
-    RCC->CFGR &= ~(0b1111 << RCC_CFGR_HPRE_Pos);
 
-    /* sets system clock as HSI48 oscillator */
-    RCC->CFGR |= 0b11 << RCC_CFGR_SW_Pos;
-    while (!(RCC->CFGR & (0b11 << RCC_CFGR_SWS_Pos)));
+    RCC->CR |= (3 << RCC_CR_HSIDIV_Pos);
+
+    RCC->PLL1CFGR |= RCC_PLL1CFGR_PLL1PEN | (2 << RCC_PLL1CFGR_PLL1M_Pos);
+    RCC->PLL1CFGR |= (1 << RCC_PLL1CFGR_PLL1SRC_Pos) | (1 << RCC_PLL1CFGR_PLL1RGE_Pos);
+
+    RCC->PLL1DIVR &= ~RCC_PLL1DIVR_PLL1N_Msk;
+    RCC->PLL1DIVR |= (124UL << RCC_PLL1DIVR_PLL1N_Pos);
+
+    /* Enables PLL1 and locks values */
+    RCC->CR |= RCC_CR_PLL1ON;
+    while (!(RCC->CR & RCC_CR_PLL1RDY));
+
+    /* sets system clock source as PLL1 */
+    RCC->CFGR1 |= 0b11 << RCC_CFGR1_SW_Pos;
+    while (!(RCC->CFGR1 & (0b11 << RCC_CFGR1_SWS_Pos)));
 }
 
+/* TODO: I'm pretty sure this whole thing needs to be rewritten */
 void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 
@@ -542,6 +553,7 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     NVIC_SetPriority(DMA1_Channel1_IRQn,0);
 }
 
+/* TODO: this whole thing also needs to be rewritten */
 void CAN_Init (){
     RCC->APB1ENR |= RCC_APB1ENR_CANEN;
     CAN->MCR |= CAN_MCR_INRQ; /* goes from normal mode into initialization mode */
@@ -553,12 +565,12 @@ void CAN_Init (){
     while (CAN->MSR & CAN_MSR_SLAK);
 
     /* set bittiming - just read wikipedia if you don't know what that is */
-    /* TODO: why is it still 1/2 of what it should be */
     CAN->BTR |= 23 << CAN_BTR_BRP_Pos | 1 << CAN_BTR_TS1_Pos | 0 << CAN_BTR_TS2_Pos;
     CAN->MCR &= ~CAN_MCR_INRQ; /* clears the initialization request and starts the actual can */
     
     while (CAN->MSR & CAN_MSR_INAK);
 
+    /* TODO: proper can filtering */
     /* blank filter - tells the can to read every message */
     CAN->FMR |= CAN_FMR_FINIT; 
     CAN->FA1R |= CAN_FA1R_FACT0;
@@ -567,7 +579,8 @@ void CAN_Init (){
     CAN->FMR &=~ CAN_FMR_FINIT;
     CAN->IER |= CAN_IER_FMPIE0;
 }
-    
+
+/* TODO: new gpio pins on v67's vcu */
 void GPIO_Init(){
     /* turn on gpio clocks */
     RCC->AHBENR |= RCC_AHBENR_GPIOAEN; 
@@ -618,6 +631,7 @@ void APPS_RollingSmooth(){
     ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
 }
 
+/* TODO: Just redo this whole thing */
 int GetTCMax(){
 #if TRACTIONCONTROL_ENABLED == 1
     const float mass_KG = 240;
@@ -653,8 +667,6 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / (maxFaultCount + 1)) * 2;
 
     uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction};
-
-    //send_CAN(0, 8, (uint8_t*)faultdat);
 
     uint16_t fault = 0, t_req = 0;
     
@@ -714,6 +726,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
     return fault;
 }
 
+/* TODO: Needs to be rewritten but not like a crazy amount */
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
     /* all mailboxes full */
     while(!(CAN->TSR & CAN_TSR_TME_Msk));
@@ -738,6 +751,7 @@ void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
     CAN->sTxMailBox[j].TIR = (uint32_t)((id << CAN_TI0R_STID_Pos) | CAN_TI0R_TXRQ);
 }
 
+/* TODO: Needs to be rewritten, maybe set flags instead of checking the mailbox, there is a strong potential for messages to be missed this way */
 void recieve_CAN(){
     /* while mailboxes aren't empty */
     while ((CAN->RF0R & CAN_RF0R_FMP0) != 0) { 
