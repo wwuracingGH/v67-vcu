@@ -307,16 +307,17 @@ inline int RTOS_removeFirstEvent(){
  * called in ms interrupt context to schedule the tasks and execute the events
  */
 inline int RTOS_Update(){
-    rtos_scheduler.timestamp++;
-    
     if(rtos_scheduler.executing) 
         rtos_scheduler.busycounter += 1; 
-    if(rtos_scheduler.timestamp % RTOS_subTick != 0) 
+    if(rtos_scheduler.timestamp % RTOS_subTick != 0){ 
+        rtos_scheduler.timestamp++;
         return 1;
+    }
+    rtos_scheduler.timestamp++;
     
     rtos_scheduler.lastbusycounter = rtos_scheduler.busycounter;
     rtos_scheduler.busycounter = 0;
-
+    
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){ 
 
         if((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 0x01) {
