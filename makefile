@@ -1,18 +1,17 @@
 CC=arm-none-eabi-gcc
-CFLAGS=-mcpu=cortex-m0 -mthumb -nostdlib -W -Wall -ffunction-sections -g
-CPPFLAGS= -DSTM32F042x6 -Ivendor/CMSIS/Device/ST/STM32F0/Include \
+CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -ffunction-sections -g
+CPPFLAGS= -DSTM32H533xx -Ivendor/CMSIS/Device/ST/STM32H5/Include \
 	 -Ivendor/CMSIS/CMSIS/Core/Include \
-	 -Ivendor/qfplib
-	
-LINKER_FILE=linker_script.ld
+
+LINKER_FILE=linker_script.ld 
 LDFLAGS=-T $(LINKER_FILE)
 
 BINARY = v67vcu.elf
 
 all: $(BINARY) clean
 
-$(BINARY): blinky_test.o startup.o system_stm32f0xx.o vendor/qfplib/qfplib.s 
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY)
+$(BINARY): blinky_test.o startup.o system_stm32h5xx.o
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
 blinky_test.o: blinky_test.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) blinky_test.c -c
@@ -20,8 +19,8 @@ blinky_test.o: blinky_test.c
 startup.o: startup.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) startup.c -c
 
-system_stm32f0xx.o: vendor/CMSIS/Device/ST/STM32F0/Source/Templates/system_stm32f0xx.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) vendor/CMSIS/Device/ST/STM32F0/Source/Templates/system_stm32f0xx.c -c
+system_stm32h5xx.o: vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c -c
 
 
 .PHONY: clean

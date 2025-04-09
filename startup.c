@@ -291,6 +291,9 @@ void main(void);
 
 void reset_handler(void)
 {
+    /* SCB->CPACR, should enable hardware floating point*/
+    *(uint32_t*)(0xE000ED88UL) |= ((3UL << 20U)|(3UL << 22U));
+
     // Copy .data from FLASH to SRAM
     uint32_t data_size = (uint32_t)&_edata - (uint32_t)&_sdata;
     uint8_t *flash_data = (uint8_t*) &_sidata; // Data load address (in flash)
