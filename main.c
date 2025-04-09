@@ -14,7 +14,6 @@
 #endif
 #include "vendor/CMSIS/Device/ST/STM32H5/Include/stm32h5xx.h"
 #include "canDefinitions.h"
-#include "vendor/qfplib/qfplib.h"
 
 #define RTOS_maxTaskNum 16
 #define RTOS_maxEventNum 8
@@ -26,8 +25,9 @@ _RTOS_IMPLEMENTATION_ /* Macro that contains the struct for the OS */
  * ADC PARAMETERS 
  */
 #define ROLLING_ADC_FR_POW 5
-#define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW) 
-#define ROLLING_ADC_VALS  (ROLLING_ADC_FRAMES * 4)
+#define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW)
+#define ADC_CHANNELS       4
+#define ROLLING_ADC_VALS   (ROLLING_ADC_FRAMES * ADC_CHANNELS)
 
 /*
  * EXTRA BEHAVIOR - 0 or 1
@@ -618,7 +618,7 @@ void APPS_RollingSmooth(){
              RBPS  = 0,
              FBPS  = 0,
              APPS1 = 0;
-    for(int i = 0; i < ROLLING_ADC_VALS; i += 4){
+    for(int i = 0; i < ROLLING_ADC_VALS; i += ADC_CHANNELS){
         APPS2 += ADC_RollingValues[i + 0];
         RBPS  += ADC_RollingValues[i + 1];
         FBPS  += ADC_RollingValues[i + 2];
