@@ -10,11 +10,11 @@ BINARY = v67vcu.elf
 
 all: $(BINARY) clean
 
-$(BINARY): blinky_test.o startup.o system_stm32h5xx.o
+$(BINARY): main.o startup.o system_stm32h5xx.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
-blinky_test.o: blinky_test.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) blinky_test.c -c
+main.o: main.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) main.c -c
 
 startup.o: startup.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) startup.c -c
