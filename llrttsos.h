@@ -12,7 +12,7 @@
 #endif
 
 #ifndef RTOS_subTick
-#define RTOS_subTick 10
+#define RTOS_subTick 50
 #endif
 
 /*
@@ -71,6 +71,8 @@ typedef struct {
     void (*callback)();
     uint16_t reset_ms;
     uint16_t counter;
+    uint16_t startTick;
+    uint16_t endTick;
 } rtos_task;
 
 typedef struct {
@@ -83,8 +85,6 @@ typedef struct {
     /* Timestamp in subticks */
     uint32_t timestamp : 31;
     uint32_t executing : 1;
-    uint8_t lastbusycounter;
-    uint8_t busycounter;  
 
     volatile taskQue_t taskQue;
     volatile eventQue_t eventQue;
@@ -307,16 +307,11 @@ inline int RTOS_removeFirstEvent(){
  * called in ms interrupt context to schedule the tasks and execute the events
  */
 inline int RTOS_Update(){
-    if(rtos_scheduler.executing) 
-        rtos_scheduler.busycounter += 1; 
     if(rtos_scheduler.timestamp % RTOS_subTick != 0){ 
         rtos_scheduler.timestamp++;
         return 1;
     }
     rtos_scheduler.timestamp++;
-    
-    rtos_scheduler.lastbusycounter = rtos_scheduler.busycounter;
-    rtos_scheduler.busycounter = 0;
     
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){ 
 
@@ -348,17 +343,19 @@ inline int RTOS_Update(){
  * called in main context to execute all tasks and events
  */
 inline int RTOS_ExecuteTasks(){
+    rtos_scheduler.executing = 1;
+    
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
         if ((rtos_scheduler.taskQue >> i) & 0x1){
-            rtos_scheduler.executing = 1;
+            rtos_scheduler.tasks[i].startTick = rtos_scheduler.timestamp; 
             rtos_scheduler.tasks[i].callback();
             rtos_scheduler.taskQue &= ~(0x1 << i);
+            rtos_scheduler.tasks[i].endTick = rtos_scheduler.timestamp; 
         }
     }
 
     for(int i = 0; i < RTOS_maxEventNum; i++){
         if ((rtos_scheduler.eventQue >> i) & 0x1){
-            rtos_scheduler.executing = 1;
             rtos_scheduler.eventHeap[i].callback();
             rtos_scheduler.eventQue &= ~(0x1 << i);
             RTOS_removeFirstEvent();

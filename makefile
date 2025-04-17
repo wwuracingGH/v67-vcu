@@ -10,7 +10,7 @@ BINARY = v67vcu.elf
 
 all: $(BINARY) clean
 
-$(BINARY): blinky_test.o startup.o system_stm32h5xx.o
+$(BINARY): blinky_test.o startup.o logging.o printf.o system_stm32h5xx.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
 blinky_test.o: blinky_test.c
@@ -18,6 +18,12 @@ blinky_test.o: blinky_test.c
 
 startup.o: startup.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) startup.c -c
+
+logging.o: logging.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) logging.c -c
+
+printf.o: vendor/printf/printf.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) vendor/printf/printf.c -c
 
 system_stm32h5xx.o: vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c -c
