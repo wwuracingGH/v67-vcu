@@ -51,7 +51,6 @@ void _init_logging() {
     GPIOA->MODER &= ~(GPIO_MODER_MODE2_Msk | GPIO_MODER_MODE3_Msk);
     GPIOA->MODER |= (0b10 << GPIO_MODER_MODE2_Pos) | (0b10 << GPIO_MODER_MODE3_Pos);
 
-    // USART2 is AF7 (found in datasheet)
     GPIOA->AFR[0] &= ~(GPIO_AFRL_AFSEL2_3 | GPIO_AFRL_AFSEL2_3);
     GPIOA->AFR[0] |= (7 << GPIO_AFRL_AFSEL2_Pos) | (7 << GPIO_AFRL_AFSEL3_Pos);
 
@@ -72,7 +71,7 @@ void _init_logging() {
 
     GPDMA2_Channel5->CTR3 |= 1 << DMA_CTR3_SAO_Pos;
 
-    USART2->CR1 |= USART_CR1_UE | USART_CR1_TE; // USART enable and transmitter enable
+    USART2->CR1 |= USART_CR1_UE | USART_CR1_TE;
 }
 
 void _flush() {
@@ -93,11 +92,6 @@ void _flush() {
     
     if (_print_buffer.put_head == PRINT_BUFFER_LEN)
         _print_buffer.put_head = 0;
-
-    for(int i = 0; i < 10; i++){
-	    for(int j = 0; j < 1000; j++);
-	    int g = i - 1;
-    }
 }
 
 void _updateLogging() {

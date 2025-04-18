@@ -16,11 +16,6 @@
 #endif
 
 /*
- * not cross platform start macros
- */
-#define RTOS_start_armeabi(CLKSPEED) SysTick_Config(CLKSPEED / (RTOS_subTick * RTOS_mainTick)); __enable_irq();
-
-/*
  * Some defaults, but the user can define their own
  */
 #ifndef RTOS_maxEventNum
@@ -101,6 +96,29 @@ typedef struct {
 } kernel;
 
 extern kernel rtos_scheduler;
+
+
+/*
+ * Not cross platform start macros
+ */
+#define RTOS_start_armeabi(CLKSPEED) SysTick_Config(CLKSPEED / (RTOS_subTick * RTOS_mainTick)); __enable_irq();
+
+/*
+ * Function macros 
+ */
+
+/*
+ * Waits for either the specified amount of time or for condition to be true, and if the time has passed
+ */
+#define RTOS_waitFor(x, timeout) uint32_t endTimestamp = rtos_scheduler.timestamp + timeout; \
+	while((rtos_scheduler.timestamp < endTimestamp) && !(x));
+
+/*
+ * If the timeout ran out
+ */
+#define RTOS_timeoutEnded() (endTimestamp >= rtos_scheduler.timestamp)
+
+
 /**
  *  Inits and zeros the RTOS, just in case
  */
@@ -151,8 +169,6 @@ int RTOS_ExecuteTasks(void);
 inline int RTOS_init(){
     rtos_scheduler.timestamp = 0;
     rtos_scheduler.executing = 0;
-    rtos_scheduler.busycounter = 0;
-    rtos_scheduler.lastbusycounter = 0;
 
     rtos_scheduler.firstEventIndex = -1;
     rtos_scheduler.numberOfStates = 0;
