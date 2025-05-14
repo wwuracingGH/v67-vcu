@@ -9,17 +9,6 @@
  */
 
 
-/* Checklist for migration:
- * Done:
- * 	clock_init()
- * 	flash_Init()
- * 	GPIO_Init()
- * 	CAN_Init()
- * 	send_CAN()
- *
- * ToDo:
- */
-
 #include <stdint.h>
 #ifndef STM32H533xx
 #define STM32H533xx
@@ -266,18 +255,18 @@ int main(void){
 //    /* setup */
     clock_init();
 
-    for(int i = 0; i < ROLLING_ADC_VALS; i++){
-        ADC_RollingValues[i] = 0;
-    }
-
-
-    flash_Init();
-    GPIO_Init(); /* must be called first */
-    BUZZEROFF(); /* turns that buzzer off */
-    RTOS_init();
+//    for(int i = 0; i < ROLLING_ADC_VALS; i++){
+//        ADC_RollingValues[i] = 0;
+//    }
 //
-    car_state.state_idle = RTOS_addState(Idle_start, 0);
-    car_state.state_rtd  = RTOS_addState(RTD_start, 0);
+//
+//    flash_Init();
+    GPIO_Init(); /* must be called first */
+//    BUZZEROFF(); /* turns that buzzer off */
+//    RTOS_init();
+//
+//    car_state.state_idle = RTOS_addState(Idle_start, 0);
+//    car_state.state_rtd  = RTOS_addState(RTD_start, 0);
 //
 //    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
 //    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
@@ -295,7 +284,7 @@ int main(void){
 //#if MC_WATCHDOG_ENABLED == 1
 //#endif
 //
-//    ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
+    ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
 //      CAN_Init();
 //
 //    /* TODO: shutup every time the MC yaps */
@@ -531,21 +520,65 @@ void clock_init() { /* turns up the speed to 250mhz */
     while (!(RCC->CFGR1 & (0b11 << RCC_CFGR1_SWS_Pos)));
 }
 
+
+
+
+
+
+#define ADC1_DMA_REQ_ID 16
+
+typedef struct __attribute__((aligned(32))){
+	uint32_t CR;	/* Channel config */
+	uint32_t BR1;	/* Number of transfers */
+	uint32_t SAR;	/* Configures source start address of a transfer */
+	uint32_t DAR;	/* Configures destination start address of a transfer */
+	uint32_t LLR;	/* Configures data structure of next LLI in memory and its addres pointer */
+} DMA_Desc_t;
+
+static DMA_Desc_t dma_desc;
+
+
+
+
 /* TODO: I'm pretty sure this whole thing needs to be rewritten */
-//void ADC_DMA_Init(uint32_t *dest, uint32_t size){
+void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 //    RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
+	RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
+	__DSB();
+//
 //
 //    ADC1->CFGR1 &= ~(uint32_t)0b011000; /* set 12 bit precision */
+	ADC1->CFGR &= ~(uint32_t)0b011000; /* Set 12 bit precision */
+//
 //
 //    ADC1->CFGR1 |= ADC_CFGR1_CONT; /* analog to digital converter to cont mode */
+	ADC1->CFGR |= ADC_CFGR_CONT;	/* analog to digital converter to cont mode */
+
+
 //    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; /* align bits to the right */
+	ADC1->CFGR &= ~ADC_CFGR_ALIGN;	/* align bits to the right */
 //
 //    ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; /* enable dma & make cont */
 //
-//    ADC1->SMPR |= 0b111;
-//
+    ADC1->CFGR |= ADC_CFGR_DMAEN | ADC_CFGR_DMACFG; /* enable dma & make cont */
+
+// F0 running at 48MHz, H533 at 250MHz
+//    ADC1->SMPR |= 0b111; /* Sets F0 MCU ADC sampling time to 239.5 clock cycles */
+    ADC1->SMPR1 = 0;
+    ADC1->SMPR1 |= (0b110 << ADC_SMPR1_SMP1_Pos)
+    		| (0b110 << ADC_SMPR1_SMP3_Pos)
+			| (0b110 << ADC_SMPR1_SMP9_Pos) ; /* Sets H5 MCU ADC sampling time to 247.5 clock cycles - I just chose this to be as close to previous as possible, 0b111 sets it to 640.5 ADC clock cycles */
+
+    ADC2->SMPR2 = 0;
+    ADC1->SMPR2 = (0b110 << (ADC_SMPR2_SMP19_Pos)); /* The macro doesnt exist but im looking at SMP19 in the datasheet */
+
+// LQFP64!!!!!!!!!!!!!!!!!!!!!!!
 //    ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5
-//                 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; /*channels to scan */
+//                 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL8; /*channels to scan */ // is there a reason to why these channels were selected?
+	ADC1->SQR1 = 0;
+    ADC1->SQR1 |= (4-1) << ADC_SQR1_L_Pos; /* Indicate the total number of conversions in sequence as 4  */
+    ADC1->SQR1 |= (1 << ADC_SQR1_SQ1_Pos | 19 << ADC_SQR1_SQ2_Pos | 3 << ADC_SQR1_SQ3_Pos | 9 << ADC_SQR1_SQ4_Pos); /* See H533 datasheet around page 70 */
+
 //
 //    /* make sure the ADC's weird clock is on */
 //    RCC->CR2 |= RCC_CR2_HSI14ON;
@@ -553,29 +586,51 @@ void clock_init() { /* turns up the speed to 250mhz */
 //    ADC1->CFGR2 &= (~ADC_CFGR2_CKMODE);
 //
 //    /* turn on interrupts for dma i think */
-//    if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
-//        ADC1->ISR |= ADC_ISR_ADRDY;
-//    ADC1->CR |= ADC_CR_ADEN;
-//    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0);
+    if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
+        ADC1->ISR |= ADC_ISR_ADRDY;
+
+    ADC1->CR |= ADC_CR_ADEN;
+    while ((ADC1->ISR & ADC_ISR_ADRDY) == 0);
+
 //
 //    RCC->AHBENR |= RCC_AHBENR_DMAEN;
-//
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPDMA1EN;
+    __DSB();
+
+    GPDMA1_Channel1->CCR&= ~DMA_CCR_EN;			/*Ensure GPDMA is disabled before configuration */
+    while((GPDMA1_Channel1->CCR & DMA_CCR_EN) != 0);
+
 //    DMA1_Channel1->CCR &= ~DMA_CCR_MEM2MEM; /* peripheral to memory */
+
+
+    /* Configure circular stuff which is more complicated on the H5 and im 90% sure this is worng */
+    dma_desc.CR = (ADC1_DMA_REQ_ID << 1); /* Select ADC1 as trigger source and enable memory increment */
+    dma_desc.BR1 = size;
+    dma_desc.SAR = (uint32_t)(&(ADC1->DR));	/* Sets the source of dma transfer */
+    dma_desc.DAR = (uint32_t)dest;				/* Sets the destination of dma transfer */
+    dma_desc.LLR = (uint32_t)(&(dma_desc));			/* Link to self */
+
+    GPDMA1_Channel1->CLBAR = (uint32_t)(&(dma_desc));
+    __DSB();
+
 //    DMA1_Channel1->CCR |= DMA_CCR_CIRC | DMA_CCR_MINC | DMA_CCR_TEIE; /* c */
 //    DMA1_Channel1->CCR |= DMA_CCR_MSIZE_0 | DMA_CCR_PSIZE_0; /* set size of data to transfer */
-//
 //    DMA1_Channel1->CPAR = (uint32_t)(&(ADC1->DR)); /* sets source of dma transfer */
 //    DMA1_Channel1->CMAR = (uint32_t)dest; /* sets destination of dma transfer */
 //    DMA1_Channel1->CNDTR = size; /* sets size of dma transfer */
 //
+    GPDMA1_Channel1->CFCR = DMA_CFCR_TCF | DMA_CFCR_HTF | DMA_CFCR_DTEF; /* Clear tx-complete, half-tx, and tx-error flags */
+
+    GPDMA1_Channel1->CCR |= DMA_CCR_EN; /* Enables dma */
 //    DMA1_Channel1->CCR |= DMA_CCR_EN; /* enables dma */
 //
 //	ADC1->CR |= ADC_CR_ADSTART; /* starts adc */
+    ADC1->CR |= ADC_CR_ADSTART;
 //
 //    /* Turns on the actual interrupts */
-//    NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-//    NVIC_SetPriority(DMA1_Channel1_IRQn,0);
-//}
+    NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
+    NVIC_SetPriority(GPDMA1_Channel1_IRQn,0);
+}
 
 /* TODO: this whole thing has began being rewriten */
 
@@ -814,25 +869,26 @@ typedef struct{
 #define FDCAN1_TX_RAM   ((volatile FDCAN_TxBuffer *)(0x4000B000UL))
 
 ///* TODO: Needs to be rewritten but not like a crazy amount */
+
+// adda parameter to specify fdcan
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
 
-	while(FDCAN1->TXFQS & FDCAN_TXFQS_TFQF_Msk){}; // Wait while tx que is full
-
-	int j = (FDCAN1->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos; // Grab the index of open buffer
-
-	/* Save the actual address of this indexed value in elm*/
-	FDCAN_TxBuffer *elm = &FDCAN1_TX_RAM[j];
-
-
-	elm->T0 = ((uint32_t)(id & 0x7FF)<<18); // 11 bit ID goes to T0
-	elm->T1 = ((length & 0x0F)<<16); // Data length code (DLC) goes to T1
-
-
-    for(int i = 0; i < length; i++)	// Copy data to buffer
-    	elm->data[i] = data[i];
-    ;
-
-    FDCAN1->TXBAR= (1UL << j); // Trigger message by writing to TX buffer
+//	while(FDCAN1->TXFQS & FDCAN_TXFQS_TFQF_Msk){}; // Wait while tx que is full
+//
+//	int j = (FDCAN1->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos; // Grab the index of open buffer
+//
+//	/* Save the actual address of this indexed value in elm*/
+//	FDCAN_TxBuffer *elm = &FDCAN1_TX_RAM[j];								// use nicoles buffers from header file
+//
+//
+//	elm->T0 = ((uint32_t)(id & 0x7FF)<<18); // 11 bit ID goes to T0
+//	elm->T1 = ((length & 0x0F)<<16); // Data length code (DLC) goes to T1
+//
+//
+//    for(int i = 0; i < length; i++)	// Copy data to buffer
+////    	FDCAN1_RAM->tx_buffers[j]->data[i] = data[i];
+//
+//    FDCAN1->TXBAR= (1UL << j); // Trigger message by writing to TX buffer
 }
 //
 ///* TODO: Needs to be rewritten, maybe set flags instead of checking the mailbox, there is a strong potential for messages to be missed this way */
@@ -865,12 +921,6 @@ void recieve_CAN(){
 
     	process_CAN(can_id, can_len, can_data);
 
-// Delete v v v v v ?
-//        uint8_t  can_len    = FDCAN1->sFIFOMailBox[0].RDTR & 0xF;
-//        uint64_t can_data   = FDCAN1->sFIFOMailBox[0].RDLR
-//            + ((uint64_t)FDCAN1->sFIFOMailBox[0].RDHR << 32);
-//        uint16_t can_id     = FDCAN1->sFIFOMailBox[0].RIR >> FDCAN1_RI0R_STID_Pos;
-//        FDCAN1->RF0R |= FDCAN1_RF0R_RFOM0; /* release mailbox */
     }
 }
 
