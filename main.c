@@ -209,7 +209,7 @@ enum Pin_Mode {
 };
 
 void clock_init();
-void ADC_DMA_Init(uint32_t *dest, uint32_t size);
+void ADC_DMA_Init(uint16_t *dest, uint32_t size); // changed to 16 - Gus
 void GPIO_Init();
 void CAN_Init();
 void flash_Init();
@@ -255,51 +255,51 @@ int main(void){
 //    /* setup */
     clock_init();
 
-//    for(int i = 0; i < ROLLING_ADC_VALS; i++){
-//        ADC_RollingValues[i] = 0;
-//    }
-//
-//
-//    flash_Init();
+    for(int i = 0; i < ROLLING_ADC_VALS; i++){
+        ADC_RollingValues[i] = 0;
+    }
+
+
+    flash_Init();
     GPIO_Init(); /* must be called first */
-//    BUZZEROFF(); /* turns that buzzer off */
-//    RTOS_init();
-//
-//    car_state.state_idle = RTOS_addState(Idle_start, 0);
-//    car_state.state_rtd  = RTOS_addState(RTD_start, 0);
-//
-//    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
-//    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
-//    RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
-//    RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
-//
-//
-//    RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
-//    RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
-//    RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
-//    RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
-//
-//    RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, MCWDPeriod);
-//
-//#if MC_WATCHDOG_ENABLED == 1
-//#endif
-//
+    BUZZEROFF(); /* turns that buzzer off */
+    RTOS_init();
+
+    car_state.state_idle = RTOS_addState(Idle_start, 0);
+    car_state.state_rtd  = RTOS_addState(RTD_start, 0);
+
+    RTOS_scheduleTask(car_state.state_idle, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_idle, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_idle, InputIdle, inputPeriod);
+    RTOS_scheduleTask(car_state.state_idle, recieve_CAN, recievePeriod);
+
+
+    RTOS_scheduleTask(car_state.state_rtd, InputRTD, inputPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, Control, controlPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, send_Diagnostics, diagPeriod);
+    RTOS_scheduleTask(car_state.state_rtd, recieve_CAN, recievePeriod);
+
+    RTOS_scheduleTask(car_state.state_rtd, MCWatchdog, MCWDPeriod);
+
+#if MC_WATCHDOG_ENABLED == 1
+#endif
+
     ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
-//      CAN_Init();
-//
-//    /* TODO: shutup every time the MC yaps */
-//    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
-//    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&torqueLimitMsg);
-//
-//    RTOS_switchState(car_state.state_idle);
-//
-//    SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
-//    __enable_irq(); /* enable interrupts */
-//
-//    /* non rt program bits */
-//    for(;;){
-//        RTOS_ExecuteTasks();
-//    }
+      CAN_Init();
+
+    /* TODO: shutup every time the MC yaps */
+    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&shutup);
+    send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t *)&torqueLimitMsg);
+
+    RTOS_switchState(car_state.state_idle);
+
+    SysTick_Config(48000); /* 48MHZ / 48000 = 1 tick every ms */
+    __enable_irq(); /* enable interrupts */
+
+    /* non rt program bits */
+    for(;;){
+        RTOS_ExecuteTasks();
+    }
 }
 
 /* runs every 1 ms */
@@ -322,72 +322,72 @@ void flash_Init(){
     }
 }
 
-//void Control() {
-//    uint8_t f = areThereResetableFaults();
-//    send_CAN(0, 1, &f);
-//    APPS_RollingSmooth();
-//    car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
-//
-//    canmsg.torqueCommand = car_state.torque_req;
-//    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
-//}
+void Control() {
+    uint8_t f = areThereResetableFaults();
+    send_CAN(0, 1, &f);
+    APPS_RollingSmooth();
+    car_state.lastAPPSFault = APPS_calc((uint16_t *)&car_state.torque_req, car_state.lastAPPSFault);
 
-//void InputIdle(){
-//    if(!(GPIOB->IDR & GPIO_IDR_1) && !(car_state.ButtonMask & BUTTONMASK_RTD)){
-//        car_state.ButtonMask |= BUTTONMASK_RTD;
-//        if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
-//             && !areThereFaults() )
-//        {
-//            if (car_state.mcstate.is.vsmState != 4) return;
-//
-//            RTOS_switchState(car_state.state_rtd);
-//
-//            while(car_state.mcstate.is.vsmState == 5 || car_state.mcstate.is.vsmState == 4) recieve_CAN();
-//
-//            if(car_state.mcstate.is.vsmState != 6) {
-//                RTOS_switchState(car_state.state_idle);
-//                BUZZEROFF();
-//                RTOS_removeFirstEvent();
-//                /* chirps buzzer */
-//                RTOS_scheduleEvent(BUZZERON, 150);
-//                RTOS_scheduleEvent(BUZZEROFF, 200);
-//            }
-//        }
-//        else if (areThereFaults()) {
-//            MCWatchdog();
-//        }
-//    }
-//    else if (GPIOB->IDR & GPIO_IDR_1){
-//        car_state.ButtonMask &= ~BUTTONMASK_RTD;
-//    }
-//}
-//
-///* processes input while car is in RTD, like when switching modes */
-//void InputRTD(){
-//
-//}
-//
-//void send_Diagnostics(){
-//    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
-//    send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
-//    send_CAN(VCU_CANID_REPROGRAMAPPS, 8, (uint8_t *)&config.calibration);
-//
-//    /* TODO: this but better */
-//    uint8_t statemsg[2] = {
-//        RTOS_inState(car_state.state_idle),
-//        RTOS_inState(car_state.state_rtd)
-//    };
-//    send_CAN(VCU_CANID_STATE, 2, statemsg);
-//}
-//
-//int areThereResetableFaults(){
-//    return ( car_state.faults.fc.postErrors & MC_RESET_BITMASK) || (car_state.faults.fc.runtimeErrors & (MC_RESET_BITMASK >> 32));
-//}
-//
-//int areThereFaults(){
-//    return car_state.faults.fc.postErrors || car_state.faults.fc.runtimeErrors || car_state.mcstate.is.vsmState > 6;
-//}
-//
+    canmsg.torqueCommand = car_state.torque_req;
+    send_CAN(MC_CANID_COMMAND, 8, (uint8_t*)&canmsg);
+}
+
+void InputIdle(){
+    if(!(GPIOB->IDR & GPIO_IDR_ID1) && !(car_state.ButtonMask & BUTTONMASK_RTD)){
+        car_state.ButtonMask |= BUTTONMASK_RTD;
+        if (((ADC_Vars.APPS1 <= APPS1_MIN) && (ADC_Vars.APPS2 <= APPS2_MIN))
+             && !areThereFaults() )
+        {
+            if (car_state.mcstate.is.vsmState != 4) return;
+
+            RTOS_switchState(car_state.state_rtd);
+
+            while(car_state.mcstate.is.vsmState == 5 || car_state.mcstate.is.vsmState == 4) recieve_CAN();
+
+            if(car_state.mcstate.is.vsmState != 6) {
+                RTOS_switchState(car_state.state_idle);
+                BUZZEROFF();
+                RTOS_removeFirstEvent();
+                /* chirps buzzer */
+                RTOS_scheduleEvent(BUZZERON, 150);
+                RTOS_scheduleEvent(BUZZEROFF, 200);
+            }
+        }
+        else if (areThereFaults()) {
+            MCWatchdog();
+        }
+    }
+    else if (GPIOB->IDR & GPIO_IDR_ID1){
+        car_state.ButtonMask &= ~BUTTONMASK_RTD;
+    }
+}
+
+/* processes input while car is in RTD, like when switching modes */
+void InputRTD(){
+
+}
+
+void send_Diagnostics(){
+    send_CAN(VCU_CANID_APPS_RAW, 8, (uint8_t *)&ADC_Vars.APPS2);
+    send_CAN(VCU_CANID_CALIBRATION, 8, (uint8_t *)&car_state.APPSCalib.apps1);
+    send_CAN(VCU_CANID_REPROGRAMAPPS, 8, (uint8_t *)&config.calibration);
+
+    /* TODO: this but better */
+    uint8_t statemsg[2] = {
+        RTOS_inState(car_state.state_idle),
+        RTOS_inState(car_state.state_rtd)
+    };
+    send_CAN(VCU_CANID_STATE, 2, statemsg);
+}
+
+int areThereResetableFaults(){
+    return ( car_state.faults.fc.postErrors & MC_RESET_BITMASK) || (car_state.faults.fc.runtimeErrors & (MC_RESET_BITMASK >> 32));
+}
+
+int areThereFaults(){
+    return car_state.faults.fc.postErrors || car_state.faults.fc.runtimeErrors || car_state.mcstate.is.vsmState > 6;
+}
+
 void Idle_start(){
     canmsg.inverterEnable = 0;
     GPIOA->ODR &= ~(1 << 9);
@@ -400,18 +400,18 @@ void RTD_start(){
     canmsg.inverterEnable = 1;
     RTOS_scheduleEvent(BUZZEROFF, buzzerDuration);
 }
-//
-//void MCWatchdog(){
-//    if(areThereFaults()){
-//        RTOS_switchState(car_state.state_idle);
-//        if(areThereResetableFaults()){
-//            /* waits until discharge is complete*/
-//            while(car_state.voltageinfo.vi.dcBusVoltage > 40);
-//            send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
-//        }
-//    }
-//}
-//
+
+void MCWatchdog(){
+    if(areThereFaults()){
+        RTOS_switchState(car_state.state_idle);
+        if(areThereResetableFaults()){
+            /* waits until discharge is complete*/
+            while(car_state.voltageinfo.vi.dcBusVoltage > 40);
+            send_CAN(MC_CANID_PARAMCOM, 8, (uint8_t*)&resetMC);
+        }
+    }
+}
+
 /*  */
 
 
@@ -527,13 +527,15 @@ void clock_init() { /* turns up the speed to 250mhz */
 
 #define ADC1_DMA_REQ_ID 16
 
-typedef struct __attribute__((aligned(32))){
+typedef struct {
 	uint32_t CR;	/* Channel config */
+	uint32_t TR1;	/* Addressing modes selected source->fixed, destination->incremented) */
+	uint32_t TR2;	/* IDK */
 	uint32_t BR1;	/* Number of transfers */
 	uint32_t SAR;	/* Configures source start address of a transfer */
 	uint32_t DAR;	/* Configures destination start address of a transfer */
 	uint32_t LLR;	/* Configures data structure of next LLI in memory and its addres pointer */
-} DMA_Desc_t;
+} DMA_Desc_t __attribute__((aligned(32)));
 
 static DMA_Desc_t dma_desc;
 
@@ -541,36 +543,42 @@ static DMA_Desc_t dma_desc;
 
 
 /* TODO: I'm pretty sure this whole thing needs to be rewritten */
-void ADC_DMA_Init(uint32_t *dest, uint32_t size){
+void ADC_DMA_Init(uint16_t *dest, uint32_t size){
+
 //    RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 	RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
 	__DSB();
-//
-//
+	if (ADC1->CR & ADC_CR_DEEPPWD) ADC1->CR &= ~ADC_CR_DEEPPWD;
+	ADC1->CR |= ADC_CR_ADVREGEN;
+	for (volatile int i=0;i<4000;i++) __NOP();      // ≈20 µs at 200 MHz
+	ADC1->CR |= ADC_CR_ADCAL;
+	while (ADC1->CR & ADC_CR_ADCAL);
+
+
 //    ADC1->CFGR1 &= ~(uint32_t)0b011000; /* set 12 bit precision */
 	ADC1->CFGR &= ~(uint32_t)0b011000; /* Set 12 bit precision */
-//
-//
+
+
 //    ADC1->CFGR1 |= ADC_CFGR1_CONT; /* analog to digital converter to cont mode */
 	ADC1->CFGR |= ADC_CFGR_CONT;	/* analog to digital converter to cont mode */
 
 
 //    ADC1->CFGR1 &= ~ADC_CFGR1_ALIGN; /* align bits to the right */
 	ADC1->CFGR &= ~ADC_CFGR_ALIGN;	/* align bits to the right */
-//
+
+
+
 //    ADC1->CFGR1 |= ADC_CFGR1_DMAEN | ADC_CFGR1_DMACFG; /* enable dma & make cont */
-//
     ADC1->CFGR |= ADC_CFGR_DMAEN | ADC_CFGR_DMACFG; /* enable dma & make cont */
 
-// F0 running at 48MHz, H533 at 250MHz
+// F0 running at 48MHz, H533 at 250MHz, change these values which are now depricated from STM32F0
 //    ADC1->SMPR |= 0b111; /* Sets F0 MCU ADC sampling time to 239.5 clock cycles */
     ADC1->SMPR1 = 0;
     ADC1->SMPR1 |= (0b110 << ADC_SMPR1_SMP1_Pos)
-    		| (0b110 << ADC_SMPR1_SMP3_Pos)
-			| (0b110 << ADC_SMPR1_SMP9_Pos) ; /* Sets H5 MCU ADC sampling time to 247.5 clock cycles - I just chose this to be as close to previous as possible, 0b111 sets it to 640.5 ADC clock cycles */
+    			|  (0b110 << ADC_SMPR1_SMP3_Pos)
+				|  (0b110 << ADC_SMPR1_SMP9_Pos) ; /* Sets H5 MCU ADC sampling time to 247.5 clock cycles - I just chose this to be as close to previous as possible, 0b111 sets it to 640.5 ADC clock cycles */
 
-    ADC2->SMPR2 = 0;
-    ADC1->SMPR2 = (0b110 << (ADC_SMPR2_SMP19_Pos)); /* The macro doesnt exist but im looking at SMP19 in the datasheet */
+    ADC1->SMPR2 = (0b110 << (ADC_SMPR2_SMP18_Pos + 3)); /* The macro doesnt exist but im looking at SMP19 in the datasheet */
 
 // LQFP64!!!!!!!!!!!!!!!!!!!!!!!
 //    ADC1->CHSELR |= ADC_CHSELR_CHSEL1 | ADC_CHSELR_CHSEL5
@@ -579,20 +587,17 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
     ADC1->SQR1 |= (4-1) << ADC_SQR1_L_Pos; /* Indicate the total number of conversions in sequence as 4  */
     ADC1->SQR1 |= (1 << ADC_SQR1_SQ1_Pos | 19 << ADC_SQR1_SQ2_Pos | 3 << ADC_SQR1_SQ3_Pos | 9 << ADC_SQR1_SQ4_Pos); /* See H533 datasheet around page 70 */
 
-//
+
 //    /* make sure the ADC's weird clock is on */
 //    RCC->CR2 |= RCC_CR2_HSI14ON;
 //    while ((RCC->CR2 & RCC_CR2_HSI14RDY) == 0);
 //    ADC1->CFGR2 &= (~ADC_CFGR2_CKMODE);
-//
-//    /* turn on interrupts for dma i think */
-    if ((ADC1->ISR & ADC_ISR_ADRDY) != 0)
-        ADC1->ISR |= ADC_ISR_ADRDY;
+
 
     ADC1->CR |= ADC_CR_ADEN;
     while ((ADC1->ISR & ADC_ISR_ADRDY) == 0);
 
-//
+
 //    RCC->AHBENR |= RCC_AHBENR_DMAEN;
     RCC->AHB1ENR |= RCC_AHB1ENR_GPDMA1EN;
     __DSB();
@@ -604,7 +609,13 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 
 
     /* Configure circular stuff which is more complicated on the H5 and im 90% sure this is worng */
-    dma_desc.CR = (ADC1_DMA_REQ_ID << 1); /* Select ADC1 as trigger source and enable memory increment */
+    dma_desc.CR = DMA_CCR_PRIO_0;
+
+    dma_desc.TR1 = DMA_CTR1_DINC |
+    			  (1 << DMA_CTR1_SDW_LOG2_Pos)|
+			      (1 << DMA_CTR1_DDW_LOG2_Pos) ;
+
+	dma_desc.TR2 = (ADC1_DMA_REQ_ID << DMA_CTR2_REQSEL_Pos);
     dma_desc.BR1 = size;
     dma_desc.SAR = (uint32_t)(&(ADC1->DR));	/* Sets the source of dma transfer */
     dma_desc.DAR = (uint32_t)dest;				/* Sets the destination of dma transfer */
@@ -621,16 +632,38 @@ void ADC_DMA_Init(uint32_t *dest, uint32_t size){
 //
     GPDMA1_Channel1->CFCR = DMA_CFCR_TCF | DMA_CFCR_HTF | DMA_CFCR_DTEF; /* Clear tx-complete, half-tx, and tx-error flags */
 
-    GPDMA1_Channel1->CCR |= DMA_CCR_EN; /* Enables dma */
+    GPDMA1_Channel1->CCR = DMA_CCR_TCIE | DMA_CCR_EN;
 //    DMA1_Channel1->CCR |= DMA_CCR_EN; /* enables dma */
-//
+
+
 //	ADC1->CR |= ADC_CR_ADSTART; /* starts adc */
-    ADC1->CR |= ADC_CR_ADSTART;
-//
+
+
 //    /* Turns on the actual interrupts */
-    NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
     NVIC_SetPriority(GPDMA1_Channel1_IRQn,0);
+    NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
+    ADC1->CR |= ADC_CR_ADSTART;
+
 }
+
+
+void GPDMA1_Channel1_IRQHandler(void)
+{
+    uint32_t csr = GPDMA1_Channel1->CSR;   // snapshot flags
+
+    /* Half‑transfer complete  (only if HTIE set) */
+    if (csr & DMA_CSR_TCF)                 /* full block finished */
+    {
+        GPDMA1_Channel1->CFCR = DMA_CFCR_TCF;  /* clear flag */
+        APPS_RollingSmooth();                  /* refresh averages */
+    }
+
+    if (csr & DMA_CSR_DTEF)               /* optional: data‑transfer error */
+    {
+        GPDMA1_Channel1->CFCR = DMA_CFCR_DTEF;  /* clear error to avoid lock‑up */
+    }
+}
+
 
 /* TODO: this whole thing has began being rewriten */
 
@@ -741,119 +774,119 @@ void GPIO_Init(){
 }
 //
 ///* very fast average */
-//void APPS_RollingSmooth(){
-//    uint32_t APPS2 = 0,
-//             RBPS  = 0,
-//             FBPS  = 0,
-//             APPS1 = 0;
-//    for(int i = 0; i < ROLLING_ADC_VALS; i += 4){
-//        APPS2 += ADC_RollingValues[i + 0];
-//        RBPS  += ADC_RollingValues[i + 1];
-//        FBPS  += ADC_RollingValues[i + 2];
-//        APPS1 += ADC_RollingValues[i + 3];
-//    }
-//
-//    ADC_Vars.APPS2 = APPS2 >> ROLLING_ADC_FR_POW;
-//    ADC_Vars.RBPS  = RBPS  >> ROLLING_ADC_FR_POW;
-//    ADC_Vars.FBPS  = FBPS  >> ROLLING_ADC_FR_POW;
-//    ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
-//}
+void APPS_RollingSmooth(){
+    uint32_t APPS2 = 0,
+             RBPS  = 0,
+             FBPS  = 0,
+             APPS1 = 0;
+    for(int i = 0; i < ROLLING_ADC_VALS; i += 4){
+        APPS2 += ADC_RollingValues[i + 0];
+        RBPS  += ADC_RollingValues[i + 1];
+        FBPS  += ADC_RollingValues[i + 2];
+        APPS1 += ADC_RollingValues[i + 3];
+    }
+
+    ADC_Vars.APPS2 = APPS2 >> ROLLING_ADC_FR_POW;
+    ADC_Vars.RBPS  = RBPS  >> ROLLING_ADC_FR_POW;
+    ADC_Vars.FBPS  = FBPS  >> ROLLING_ADC_FR_POW;
+    ADC_Vars.APPS1 = APPS1 >> ROLLING_ADC_FR_POW;
+}
 //
 ///* TODO: Just redo this whole thing */
-//int GetTCMax(){
-//#if TRACTIONCONTROL_ENABLED == 1
-//    const float mass_KG = 240;
-//    const float rearAxel_Moment = 0.78f;
-//    const float gravity = 9.81f;
-//    const float cg_height = 22.86f;
-//    const float wheelbase = 1.54f;
-//    const float wheelbasediv = 1.0f/wheelbase;
-//
-//    const float ellipseOblongConst = 1.2f; /*reciprocal of how weak the side friction is compared to the long friction */
-//
-//    float rearAxel_downforce = ((2 * (wheelbase - rearAxel_Moment) * gravity)
-//        + (cg_height * car_state.acceleration.ca.carAccel_X))
-//        * (0.5f * wheelbasediv)
-//        * mass_KG;
-//    float rearAxel_Force_Y = (wheelbase - rearAxel_Moment) * wheelbasediv * mass_KG
-//        * car_state.acceleration.ca.carAccel_Y;
-//
-//    float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
-//
-//    return 0;
-//#else
-//    return MAX_TORQUE_REQ;
-//#endif
-//}
+int GetTCMax(){
+#if TRACTIONCONTROL_ENABLED == 1
+    const float mass_KG = 240;
+    const float rearAxel_Moment = 0.78f;
+    const float gravity = 9.81f;
+    const float cg_height = 22.86f;
+    const float wheelbase = 1.54f;
+    const float wheelbasediv = 1.0f/wheelbase;
+
+    const float ellipseOblongConst = 1.2f; /*reciprocal of how weak the side friction is compared to the long friction */
+
+    float rearAxel_downforce = ((2 * (wheelbase - rearAxel_Moment) * gravity)
+        + (cg_height * car_state.acceleration.ca.carAccel_X))
+        * (0.5f * wheelbasediv)
+        * mass_KG;
+    float rearAxel_Force_Y = (wheelbase - rearAxel_Moment) * wheelbasediv * mass_KG
+        * car_state.acceleration.ca.carAccel_Y;
+
+    float usable_ux = qfp_fsqrt(1 - (rearAxel_downforce * rearAxel_downforce)) * ellipseOblongConst;
+
+    return 0;
+#else
+    return MAX_TORQUE_REQ;
+#endif
+}
 //
 ///* returns 1 if there's an issue */
-//int APPS_calc(uint16_t *torque, uint16_t lastFault){
-//    static uint8_t faultCounter = 0;
-//    const uint32_t maxFaultCount = ((uint32_t)100 / controlPeriod) - 1; /* 100ms */
-//    const uint32_t faultMinToSub = maxFaultCount / 2;
-//
-//    uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / (maxFaultCount + 1)) * 2;
-//
-//    uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction};
-//
-//    uint16_t fault = 0, t_req = 0;
-//
-//    const float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
-//    const float apps2div = 1.0f / (APPS2_MAX - APPS2_MIN);
-//
-//    float apps1 = ((float)ADC_Vars.APPS1 - APPS1_MIN) * apps1div,
-//          apps2 = ((float)ADC_Vars.APPS2 - APPS2_MIN) * apps2div;
-//
-//    if(apps1 < SENSOR_MIN || apps2 < SENSOR_MIN || apps1 > SENSOR_MAX || apps2 > SENSOR_MAX)
-//        fault = 1;
-//    else {
-//        apps1 = (apps1 > 1.0f) ? 1.0f : apps1;
-//        apps1 = (apps1 < 0.0f) ? 0.0f : apps1;
-//        apps2 = (apps2 > 1.0f) ? 1.0f : apps2;
-//        apps2 = (apps2 < 0.0f) ? 0.0f : apps2;
-//    }
-//
-//    float c_app = (apps1 + apps2) * 0.5f;
-//
-//    if      (lastFault == 3 && c_app > 0.05f)
-//        fault = 3;
-//    else if (fault == 1)
-//                 ;
-//    else if (FABS(apps1 - apps2) > 0.1f)
-//        fault = 2;
-//    else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
-//        fault = 3;
-//    else
-//        faultCounter = 0;
-//
-//    if (fault != 0 && faultCounter <= maxFaultCount) faultCounter++;
-//
-//    car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
-//    car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
-//    car_state.APPSCalib.torque = (uint16_t)t_req;
-//    car_state.APPSCalib.fault  = (uint16_t)fault;
-//
-//    if (faultCounter >= maxFaultCount || RTOS_inState(car_state.state_idle)){
-//        t_req = 0;
-//    }
-//    else {
-//        if (faultCounter >= faultMinToSub)
-//            t_req = car_state.torque_req - faultSubtraction; /* gradual decrease to ensure no resolver faults */
-//        else
-//            t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
-//    }
-//
-//
-//#if REGENBRAKING_ENABLED == 1
-//    /* TODO: REGEN? */
-//#endif
-//
-//    if(t_req > GetTCMax()) t_req = GetTCMax();
-//
-//    *torque = t_req;
-//    return fault;
-//}
-//
+int APPS_calc(uint16_t *torque, uint16_t lastFault){
+    static uint8_t faultCounter = 0;
+    const uint32_t maxFaultCount = ((uint32_t)100 / controlPeriod) - 1; /* 100ms */
+    const uint32_t faultMinToSub = maxFaultCount / 2;
+
+    uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / (maxFaultCount + 1)) * 2;
+
+    uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction};
+
+    uint16_t fault = 0, t_req = 0;
+
+    const float apps1div = 1.0f / (APPS1_MAX - APPS1_MIN);
+    const float apps2div = 1.0f / (APPS2_MAX - APPS2_MIN);
+
+    float apps1 = ((float)ADC_Vars.APPS1 - APPS1_MIN) * apps1div,
+          apps2 = ((float)ADC_Vars.APPS2 - APPS2_MIN) * apps2div;
+
+    if(apps1 < SENSOR_MIN || apps2 < SENSOR_MIN || apps1 > SENSOR_MAX || apps2 > SENSOR_MAX)
+        fault = 1;
+    else {
+        apps1 = (apps1 > 1.0f) ? 1.0f : apps1;
+        apps1 = (apps1 < 0.0f) ? 0.0f : apps1;
+        apps2 = (apps2 > 1.0f) ? 1.0f : apps2;
+        apps2 = (apps2 < 0.0f) ? 0.0f : apps2;
+    }
+
+    float c_app = (apps1 + apps2) * 0.5f;
+
+    if      (lastFault == 3 && c_app > 0.05f)
+        fault = 3;
+    else if (fault == 1)
+                 ;
+    else if (FABS(apps1 - apps2) > 0.1f)
+        fault = 2;
+    else if (c_app > 0.25f && (ADC_Vars.FBPS > BRAKES_THREASHOLD))
+        fault = 3;
+    else
+        faultCounter = 0;
+
+    if (fault != 0 && faultCounter <= maxFaultCount) faultCounter++;
+
+    car_state.APPSCalib.apps1  = (uint16_t)(apps1 * 1000);
+    car_state.APPSCalib.apps2  = (uint16_t)(apps2 * 1000);
+    car_state.APPSCalib.torque = (uint16_t)t_req;
+    car_state.APPSCalib.fault  = (uint16_t)fault;
+
+    if (faultCounter >= maxFaultCount || RTOS_inState(car_state.state_idle)){
+        t_req = 0;
+    }
+    else {
+        if (faultCounter >= faultMinToSub)
+            t_req = car_state.torque_req - faultSubtraction; /* gradual decrease to ensure no resolver faults */
+        else
+            t_req = REMAPm_M(c_app, MIN_TORQUE_REQ, MAX_TORQUE_REQ);
+    }
+
+
+#if REGENBRAKING_ENABLED == 1
+    /* TODO: REGEN? */
+#endif
+
+    if(t_req > GetTCMax()) t_req = GetTCMax();
+
+    *torque = t_req;
+    return fault;
+}
+
 
 typedef struct{
 	uint32_t T0;
