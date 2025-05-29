@@ -61,15 +61,12 @@ void _init_logging() {
     RCC->AHB1ENR |= RCC_AHB1ENR_GPDMA2EN;
 
     GPDMA2_Channel5->CTR1 |= DMA_CTR1_SINC | DMA_CTR1_SAP; /* set size of data to transfer */
-    GPDMA2_Channel5->CTR2 |= 0b01 << DMA_CTR2_TRIGPOL_Pos | 24 << DMA_CTR2_REQSEL_Pos 
-                            | DMA_CTR2_DREQ | (0b11 << DMA_CTR2_TRIGM_Pos);
+    GPDMA2_Channel5->CTR2 |= 24 << DMA_CTR2_REQSEL_Pos | DMA_CTR2_PFREQ | DMA_CTR2_BREQ | DMA_CTR2_DREQ;
     
     GPDMA2_Channel5->CDAR = (uint32_t)(&(USART2->TDR)); /* sets destination of dma transfer */
    
     /* sets size of burst at 1 */
     GPDMA2_Channel5->CTR1 &= ~(63 << DMA_CTR1_DBL_1_Pos) | ~(63 << DMA_CTR1_SBL_1_Pos);
-
-    GPDMA2_Channel5->CTR3 |= 1 << DMA_CTR3_SAO_Pos;
 
     USART2->CR1 |= USART_CR1_UE | USART_CR1_TE;
 }
