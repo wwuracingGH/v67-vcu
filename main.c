@@ -13,8 +13,9 @@
 #ifndef STM32H533xx
 #define STM32H533xx
 #endif
-#include "vendor/CMSIS/Device/ST/STM32H5/Include/stm32h5xx.h"
+#include "stm32h5xx.h"
 #include "canDefinitions.h"
+#include "stm32h5xxCANSRAM.h"
 
 #define RTOS_maxTaskNum 16
 #define RTOS_maxEventNum 8
@@ -284,7 +285,7 @@ int main(void){
 #if MC_WATCHDOG_ENABLED == 1
 #endif
 
-    ADC_DMA_Init((uint32_t *)ADC_RollingValues, ROLLING_ADC_VALS);
+    ADC_DMA_Init((uint16_t *)ADC_RollingValues, ROLLING_ADC_VALS);
       CAN_Init();
 
     /* TODO: shutup every time the MC yaps */
@@ -413,19 +414,77 @@ void MCWatchdog(){
 }
 
 /*  */
+static inline void wait_ready(void)
+{
+    while (FLASH->NSSR & FLASH_SR_BSY) { }          /* busy      */
+    FLASH->NSCCR = 0xFFFFFFFFU;                       /* clr errs  */
+}
 
+void reprogram(const _settings newCfg)
+{
+    const uint32_t addr  = (uint32_t)&config;
+    const uint32_t end   = addr + sizeof(_settings);
 
-
-
-void reprogram(_settings newConfig) {
-
-    uint32_t configptr = (uint32_t)&config;
-
-    if (configptr < 0x0900C000 || configptr >= 0x09017FFF - sizeof(config)) {
-        /* TODO: better way to error out of here */
+    /* ─── range check: stay inside the data-flash window ─────────── */
+    if (addr < 0x0900C000U || end > 0x09017FFFU) {
         default_handler();
         return;
     }
+
+
+
+
+    /* ─── helper: wait until flash idle, then clear sticky flags ─── */
+    auto inline void wait_ready(void)
+    {
+        while (FLASH->NSSR & (FLASH_SR_BSY | FLASH_SR_DBNE | FLASH_SR_WBNE)) { }          /* busy    */
+    }
+
+
+    FLASH->NSSR |= FLASH_SR_EOP | FLASH_SR_WRPERR | FLASH_SR_PGSERR | FLASH_SR_STRBERR | FLASH_SR_INCERR | FLASH_SR_OPTCHANGEERR;
+
+    /* ─── unlock the non-secure flash interface ──────────────────── */
+    if (FLASH->NSCR & FLASH_CR_LOCK) {
+        FLASH->NSKEYR = 0x45670123U;
+        FLASH->NSKEYR = 0xCDEF89ABU;
+    }
+
+    /* ─── erase every 8 KiB page that overlaps the struct ────────── */
+    const uint32_t first = (addr - 0x08000000U) / 0x2000U;
+    const uint32_t last  = (end  - 1           - 0x08000000U) / 0x2000U;
+
+
+    for (uint32_t page = first; page <= last; ++page) {
+        wait_ready();
+        FLASH->NSCR  = FLASH_CR_SNB_Msk | (page << FLASH_CR_SNB_Pos);
+        FLASH->NSCR |= FLASH_CR_SER;
+        FLASH->NSCR |= FLASH_CR_START;
+    }
+    wait_ready();
+    FLASH->NSCR &= ~FLASH_CR_SER;          /* leave erase mode        */
+
+    /* ─── program the new struct (64-bit granularity) ────────────── */
+    const uint64_t *src = (const uint64_t *)&newCfg;
+    uint64_t       *dst = (uint64_t *)addr;
+    const uint32_t dws  = (sizeof(_settings) + 7U) / 8U;  /* round up */
+
+    /* ─── unlock the non-secure flash interface ──────────────────── */
+    if (FLASH->NSCR & FLASH_CR_LOCK) {
+        FLASH->NSKEYR = 0x45670123U;
+        FLASH->NSKEYR = 0xCDEF89ABU;
+    }
+
+    FLASH->NSCR |= FLASH_CR_PG;            /* enable program mode    */
+    for (uint32_t i = 0; i < dws; ++i) {
+        dst[i] = src[i];                     /* single 64-bit write    */
+        wait_ready();
+    }
+    FLASH->NSCR &= ~FLASH_CR_PG;           /* disable program mode   */
+
+    FLASH->NSCR |= FLASH_CR_LOCK;          /* re-lock controller     */
+    NVIC_SystemReset();                      /* reboot with new config */
+}
+
 
 //    /* TODO: rewrite this function so it works with the H5 flash peripheral,
 //     * they're pretty similar but its called like "unsafe control register or something"
@@ -450,7 +509,7 @@ void reprogram(_settings newConfig) {
 //    FLASH->CR &= FLASH_CR_PG;
 //
 //    NVIC_SystemReset();
-}
+
 
 
 
@@ -548,8 +607,10 @@ void ADC_DMA_Init(uint16_t *dest, uint32_t size){
 //    RCC->APB2ENR |= RCC_APB2ENR_ADCEN;
 	RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
 	__DSB();
+
 	if (ADC1->CR & ADC_CR_DEEPPWD) ADC1->CR &= ~ADC_CR_DEEPPWD;
 	ADC1->CR |= ADC_CR_ADVREGEN;
+
 	for (volatile int i=0;i<4000;i++) __NOP();      // ≈20 µs at 200 MHz
 	ADC1->CR |= ADC_CR_ADCAL;
 	while (ADC1->CR & ADC_CR_ADCAL);
@@ -669,53 +730,99 @@ void GPDMA1_Channel1_IRQHandler(void)
 
 
 
-typedef struct{
-	uint32_t R0;
-	uint32_t R1;
-	uint8_t data[8];
-} FDCAN_RxBuffer;
 
-#define FDCAN1_RX_FIFO0   ((volatile FDCAN_RxBuffer *)(0x4000B100U))
 
+
+// WORKING CAN CODE
 void CAN_Init (){
 
 	/* Enable FDCAN clock */
 	RCC->APB1HENR |= RCC_APB1HENR_FDCANEN;
+	__DSB();
 
 	/* Enter initialization mode */
+
+
+
+	FDCAN1->CCCR &= ~(FDCAN_CCCR_CSR);
+	while (FDCAN1->CCCR & FDCAN_CCCR_CSR){};
+
 	FDCAN1->CCCR |= FDCAN_CCCR_INIT;
-	while((FDCAN1->CCCR & FDCAN_CCCR_INIT) == 0){
-		/* Wait */
-	}
+	while((FDCAN1->CCCR & FDCAN_CCCR_INIT) == 0){/* Wait for INIT to set */}
+
 
 	/* Enable the Configuration Change Enable (CCE) bit */
 
 	FDCAN1->CCCR |= FDCAN_CCCR_CCE;
 
+	//FDCAN1->CKDIV |= ;
+
+
+	FDCAN1->CCCR &= ~(FDCAN_CCCR_DAR | FDCAN_CCCR_TEST | FDCAN_CCCR_MON| FDCAN_CCCR_ASM);
+
+	FDCAN1->TEST &= ~FDCAN_TEST_LBCK;
+
+
+
+//	FDCAN_CCCR_PXHD |= // probably 0?
+
+
 	/* Configure Nominal Bit Timing and prescaler */
 
-    FDCAN1->NBTP = (23 << FDCAN_NBTP_NBRP_Pos) |		// Bit rate prescaler. the actual value is one higher than programed (x+1)
+    FDCAN1->NBTP |= (23 << FDCAN_NBTP_NBRP_Pos) |		// Bit rate prescaler. the actual value is one higher than programed (x+1)
                    (1 << FDCAN_NBTP_NTSEG1_Pos)|		// Nominal time segment before sample point  x+1
-                   (0 << FDCAN_NBTP_NTSEG2_Pos);		// Nominal time segment after sample point x+1
+                   (0 << FDCAN_NBTP_NTSEG2_Pos)|		// Nominal time segment after sample point x+1
+				   (0 << FDCAN_NBTP_NSJW_Pos);
+
+
 
     /* Configure Global Acceptance Filtering to set blank filter */
+    FDCAN1->RXGFC |= (0 << FDCAN_RXGFC_ANFS_Pos)|
+    				(0 << FDCAN_RXGFC_ANFE_Pos);
 
+//    const uint32_t rx0_off = ((uint32_t)&FDCAN1_RAM->rx_fifo0[0] - FDCAN1_RAM_BASE_S) / 4U;
+//    FDCAN1->RXF0S |= (rx0_off << FDCAN_RXF0S_F0PI_Pos)          /* F0SA (word address) */
+//                  | (3U       << FDCAN_RXF0S_F0FL_Pos);        /* F0S  = 3 elements   */
+
+    FDCAN1->TXBC |= (0 << FDCAN_TXBC_TFQM_Pos); // Set tx fifo queue mode to FIFO operation
+
+    /* Tx FIFO/Queue : &tx_buffers[0] */
+//    const uint32_t tx_off  = ((uint32_t)&FDCAN1_RAM->tx_event_fifo[0] - FDCAN1_RAM_BASE_S) / 4U;
+//    FDCAN1->TXEFS  |= (tx_off << FDCAN_TXEFS_EFGI_Pos)
+//    				|(3U << (FDCAN_TXEFS_EFFL_Pos));
+       /* TFQS = 3 / FIFO mode*/
+
+
+    /* No filter lists → size = 0, start address = don’t-care            */
     FDCAN1->RXGFC = (0 << FDCAN_RXGFC_ANFS_Pos)|
                     (0 << FDCAN_RXGFC_ANFE_Pos);
 
-    uint32_t start = (((uint32_t)FDCAN1_RX_FIFO0 - FDCAN1_BASE) / 4);
-    FDCAN1_RXF0C = (start << FDCAN_RXF0C_F0SA_Pos)
-                 | (8     << FDCAN_RXF0C_F0S_Pos)
-                 | (0     << FDCAN_RXF0C_F0WM_Pos);
 
-    /* Exit Initialize Mode */
-    FDCAN1->CCCR &= ~FDCAN_CCCR_INIT;
 
-    while ((FDCAN1->CCCR & FDCAN_CCCR_INIT) != 0) {
+//    FDCAN1->IE  = FDCAN_IE_RF0NE;
+//    FDCAN1->ILS = 0x00000000U;                /* all flags → line0 */
+//    FDCAN1->ILE = FDCAN_ILE_EINT0;            /* enable line0     */
+//    NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+//    NVIC_SetPriority(FDCAN1_IT0_IRQn, 1);
+
+    FDCAN1->CCCR &= ~(FDCAN_CCCR_INIT);
+    while (FDCAN1->CCCR & FDCAN_CCCR_INIT) {
     	/* Wait */
     }
+
+
+//    uint32_t start = (((uint32_t)FDCAN1_RX_FIFO0 - FDCAN1_BASE) / 4);
+//    FDCAN1_RXF0C = (start << FDCAN_RXF0C_F0SA_Pos)
+//                 | (8     << FDCAN_RXF0C_F0S_Pos)
+//                 | (0     << FDCAN_RXF0C_F0WM_Pos);
+
+    /* Exit Initialize Mode */
+
+
 }
 
+
+//  OLD CAN CODE BELOW
 //    RCC->APB1ENR |= RCC_APB1ENR_CANEN;
 //    CAN->MCR |= CAN_MCR_INRQ; /* goes from normal mode into initialization mode */
 //
@@ -827,7 +934,7 @@ int APPS_calc(uint16_t *torque, uint16_t lastFault){
 
     uint32_t faultSubtraction = ((uint32_t)MAX_TORQUE_REQ / (maxFaultCount + 1)) * 2;
 
-    uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction};
+    uint16_t faultdat[4] = {faultCounter, (uint16_t)maxFaultCount, (uint16_t)faultMinToSub, (uint16_t) faultSubtraction}; // Gus: IDK why this is unused
 
     uint16_t fault = 0, t_req = 0;
 
@@ -899,31 +1006,35 @@ typedef struct{
 
 
 
-#define FDCAN1_TX_RAM   ((volatile FDCAN_TxBuffer *)(0x4000B000UL))
 
 ///* TODO: Needs to be rewritten but not like a crazy amount */
 
 // adda parameter to specify fdcan
 void send_CAN(uint16_t id, uint8_t length, uint8_t* data){
 
-//	while(FDCAN1->TXFQS & FDCAN_TXFQS_TFQF_Msk){}; // Wait while tx que is full
-//
-//	int j = (FDCAN1->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos; // Grab the index of open buffer
-//
-//	/* Save the actual address of this indexed value in elm*/
-//	FDCAN_TxBuffer *elm = &FDCAN1_TX_RAM[j];								// use nicoles buffers from header file
-//
-//
-//	elm->T0 = ((uint32_t)(id & 0x7FF)<<18); // 11 bit ID goes to T0
-//	elm->T1 = ((length & 0x0F)<<16); // Data length code (DLC) goes to T1
-//
-//
-//    for(int i = 0; i < length; i++)	// Copy data to buffer
-////    	FDCAN1_RAM->tx_buffers[j]->data[i] = data[i];
-//
-//    FDCAN1->TXBAR= (1UL << j); // Trigger message by writing to TX buffer
+	while(FDCAN1->TXFQS & FDCAN_TXFQS_TFQF_Msk); // Wait while tx que is full
+
+	int j = (FDCAN1->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos; // Grab the index of open buffer
+
+	/* Find the indexed buffer */
+	FDCAN_Tx_FIFO_Element_Typedef *elm = &FDCAN1_RAM->tx_buffers[j];								// use nicoles buffers from header file
+
+
+	elm->H0 = 0; // 11 bit ID goes to T0
+    elm->H0 |= ((uint32_t)id << FDCAN_TXBH0_STDID_Pos);     /* STDID   */
+
+    elm->H1  = 0;
+    elm->H1 |= ((uint32_t)length << FDCAN_TXBH1_DLC_Pos);      /* DLC */
+
+    for(uint8_t i = 0; i < length; i++)	// Copy data to buffer
+    	elm->data[i] = data[i];
+
+    FDCAN1->TXBAR= (1UL << j); // Trigger message by writing to TX buffer
 }
 //
+
+
+
 ///* TODO: Needs to be rewritten, maybe set flags instead of checking the mailbox, there is a strong potential for messages to be missed this way */
 void recieve_CAN(){
     /* while mailboxes aren't empty */
@@ -931,11 +1042,11 @@ void recieve_CAN(){
 
     	uint32_t idx = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos; // read index of next message
 
-    	volatile FDCAN_RxBuffer *rx = &FDCAN1_RX_FIFO0[idx];	// Get pointer of message in RAM
+    	volatile FDCAN_Rx_FIFO_Element_Typedef *rx = &FDCAN1_RAM->rx_fifo0[idx];	// Get pointer of message in RAM
 
-    	uint16_t can_id = (uint16_t)((rx->R0 >> 18) & 0xF);	// Get 11 bit ID
+    	uint16_t can_id = (uint16_t)((rx->H0 >> 18) & 0x7FF);	// Get 11 bit ID
 
-    	uint8_t dlc = (uint8_t)((rx->R1 >> 16) & 0xF);	// Get DLC
+    	uint8_t dlc = (uint8_t)((rx->H1 >> 16) & 0xF);	// Get DLC
     	uint8_t can_len = 0;
 
     	if (dlc <= 8)
