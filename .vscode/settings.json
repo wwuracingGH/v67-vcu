@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "stm32h5xx.h": "c",
+        "gpio.h": "c",
+        "printf.h": "c"
+    }
+}
