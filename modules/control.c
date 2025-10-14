@@ -1,5 +1,45 @@
 #include "Control.h"
 #include <stdint.h>
+#include "stm32h533xx.h"
+
+/* init adc1 to work with the dma in the background */
+void ADC_init(){
+    /* adc1 sequence -> 0 1 14 15 18 19 */
+
+    /* enable the adc */
+    RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
+
+    /* TODO: enable adc clock -> make sure it's < 125 MHZ */
+
+    /* make sure it's not on */
+    ADC1->CR &= ~1UL;
+
+    /* calibrate the adc */
+    ADC1->CR |= 1UL << ADC_CR_ADCAL_Pos;   
+    while(ADC1->CR & ADC_CR_ADCAL);
+
+    /* ensure injection disabled, continuous, dma enabled */
+    ADC1->CFGR |= ADC_CFGR_JQDIS | ADC_CFGR_CONT | ADC_CFGR_DMAEN;
+
+    /* NO OVERSAMPLING, can be changed later */
+    uint32_t oversampling = 0UL;
+    ADC1->SMPR1 |= (oversampling << ADC_SMPR1_SMP0_Pos) | (oversampling << ADC_SMPR1_SMP1_Pos);
+    ADC1->SMPR2 |= (oversampling << ADC_SMPR2_SMP14_Pos) | (oversampling << ADC_SMPR2_SMP15_Pos)
+                | (oversampling << ADC_SMPR2_SMP18_Pos) | (oversampling << 27UL);
+
+    /* set sequence */
+    ADC1->SQR1 |= 5 << ADC_SQR1_L_Pos;
+    ADC1->SQR1 |= (0 << ADC_SQR1_SQ1_Pos) | (1 << ADC_SQR1_SQ2_Pos) | (14 << ADC_SQR1_SQ3_Pos) |
+                (15 << ADC_SQR1_SQ4_Pos);
+    ADC1->SQR2 |= (19 << ADC_SQR2_SQ6_Pos) | (18 << ADC_SQR2_SQ5_Pos);
+
+
+
+    /* enable the adc DONT UNCOMMENT UNTIL A BETTER CLOCK SOLUTION HAS BEEN FOUND */
+    //ADC1->CR |= 1UL;
+
+}
+
 
 /* internal function that condenses and writes apps values */
 /* compiler should use SIMD instructions for this - maybe check? */

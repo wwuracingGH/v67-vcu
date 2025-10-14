@@ -38,7 +38,7 @@ void GPIO_Init(){
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE12_Pos)  /* CAN1 RX       */
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE13_Pos)  /* SWD IO 		*/
 				 |  (MODE_ALTFUNC   << GPIO_MODER_MODE14_Pos)  /* SWD CLK 		*/
-				 |  (MODE_ALTFUNC   << GPIO_MODER_MODE15_Pos); /* IDK */
+				 |  (MODE_ALTFUNC   << GPIO_MODER_MODE15_Pos); /* IDK - keep this tho */
 
 
     GPIOA->PUPDR  = 0;
