@@ -24,10 +24,13 @@ void CAN_Init(){
 	FDCAN1->CCCR |= FDCAN_CCCR_CCE;
 	while ((FDCAN1->CCCR & FDCAN_CCCR_CCE) == 0);  /* wait for cce */
 
-	/* clock in is at 125mhz (set in clock config), there are 5 divs and the segs are 2 long */
+	/* TODO: get rid of this */
+	FDCAN1->CCCR |= FDCAN_CCCR_DAR; /* disable automatic retransmission */
+
+	/* clock in is at 125mhz (set in clock config), there are 4 divs and the first seg is 2 long */
     FDCAN1->NBTP = (124 << FDCAN_NBTP_NBRP_Pos) |
                    (1 << FDCAN_NBTP_NTSEG1_Pos) |		
-                   (1 << FDCAN_NBTP_NTSEG2_Pos) |		
+                   (0 << FDCAN_NBTP_NTSEG2_Pos) |		
 				   (0 << FDCAN_NBTP_NSJW_Pos);
 
     /* Configure Global Acceptance Filtering to set blank filter */

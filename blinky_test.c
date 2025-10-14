@@ -83,7 +83,7 @@ void clock_init() /* turns up the speed to 250mhz */
     /* set clock speed to 250mhz */
     RCC->PLL1DIVR &= ~(RCC_PLL1DIVR_PLL1N_Msk | RCC_PLL1DIVR_PLL1Q_Msk);
     RCC->PLL1DIVR |= ((((SYS_CLOCK/1000000UL) >> 1) - 1) << RCC_PLL1DIVR_PLL1N_Pos);
-    RCC->PLL1DIVR |= (2 << RCC_PLL1DIVR_PLL1Q_Pos);
+    RCC->PLL1DIVR |= (3 << RCC_PLL1DIVR_PLL1Q_Pos); /* PLL1_Q divide by 4 */
 
     /* Enables PLL1 and locks values */
     RCC->CR |= RCC_CR_PLL1ON;
