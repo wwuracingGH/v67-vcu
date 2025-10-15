@@ -32,8 +32,8 @@ void blinky(){
 
 void say_hello(){
     LOG("Hello World!\n");
-    char h[2] = "hi";
-    CAN_sendmessage(FDCAN1, 0, 2, h);
+    uint8_t *h = "hello!";
+    CAN_sendmessage(FDCAN1, 2, 6, h);
 }
 
 int main(void) {
