@@ -10,6 +10,9 @@ void ADC_init(){
     RCC->AHB2ENR |= RCC_AHB2ENR_ADCEN;
 
     /* TODO: enable adc clock -> make sure it's < 125 MHZ */
+    // CKMODE[1:0] of ADC_CCR must be different from 00
+    // Divides the 250 MHz Clock by 2 to match 125 MHz
+    ADC->CCR |= 2UL << ADC_CCR_CKMODE;
 
     /* make sure it's not on */
     ADC1->CR &= ~1UL;
