@@ -6,6 +6,7 @@
 #include "llrttsos.h"
 #include "modules/gpio.h"
 #include "modules/logging.h"
+#include "modules/control.h"
 #include "modules/can.h"
 #include "vendor/printf/printf.h"
 _RTOS_IMPLEMENTATION_
@@ -30,10 +31,53 @@ void blinky(){
     col %= 6;
 }
 
+ADC_Bounds_t bounds = {
+    895,
+    1819,
+    2477, 
+    1563,
+    780,
+    2256,
+    2521,
+    1397,
+    500,
+    3500
+};
+
+ControlParams_t cparams = { 1000, 0, 0, 100};
+
 void say_hello(){
-    LOG("Hello World!\n");
     uint8_t *h = "hello!";
-    CAN_sendmessage(FDCAN1, 2, 6, h);
+    uint8_t *w = "world!";
+    //CAN_sendmessage(FDCAN1, 2, 6, h);
+    //CAN_sendmessage(FDCAN2, 2, 6, w);
+    
+
+    TorqueReq_t torque_req = calc_torque_request(bounds, cparams);
+    ADC_Block_t b = condense();
+    LOGLN("%d %d %d %d %d %d", b.APPS1, b.APPS2, b.APPS3, b.APPS4, torque_req.torque, torque_req.flags);
+}
+
+void whattodowithCAN(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data){
+	(void)bus;
+	(void)dlc;
+	(void)data;
+
+	uint8_t * datastr;
+	datastr = data;
+
+	char *h = "hhhh";
+	switch(id){
+	default:
+	case 111:
+		LOG(h);
+		break;
+	}
+}
+
+
+void processCAN(){
+    CAN_recieveMessages(whattodowithCAN);
 }
 
 int main(void) {
@@ -41,6 +85,8 @@ int main(void) {
     GPIO_Init();
     RTOS_init();
     CAN_Init();
+    ADC_Init();
+
     logging_init();
     _enable_logging_all();
 
@@ -48,12 +94,14 @@ int main(void) {
 
     int default_state = RTOS_addState(0,0);
     RTOS_scheduleTask(default_state, blinky, 100);
-    RTOS_scheduleTask(default_state, say_hello, 500);
+    RTOS_scheduleTask(default_state, say_hello, 20);
+    RTOS_scheduleTask(default_state, processCAN, 10);
 
     RTOS_switchState(default_state);
 
     RTOS_start_armeabi(SYS_CLOCK);
 
+    LOG("Hello World!\n");
     LOGLN("CLOCK CHECK: %d", SysTick->LOAD + 1);
     while(1){
         RTOS_ExecuteTasks();
@@ -93,14 +141,8 @@ void clock_init() /* turns up the speed to 250mhz */
     RCC->CFGR1 |= 0b11 << RCC_CFGR1_SW_Pos;
     while (!(RCC->CFGR1 & (0b11 << RCC_CFGR1_SWS_Pos)));
 
-    /* sets APB2_div to be half speed */
-    RCC->CFGR2 &= 0b111 << RCC_CFGR2_PPRE2_Pos;
-    RCC->CFGR2 |= 0b100 << RCC_CFGR2_PPRE2_Pos;
-
     /* sets CAN source as PLL1 Q */
     RCC->CCIPR5 |= 0b01 << RCC_CCIPR5_FDCANSEL_Pos;
-    ///* sets ADC source as PLL2 Q (TODO) */
-    //RCC->CCIPR5 |= 0b010 << RCC_CCIPR5_ADCDACSEL_Pos;
 }
 
 void systick_handler(){ 

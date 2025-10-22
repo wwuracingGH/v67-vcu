@@ -12,7 +12,7 @@
 
 #define APPS_OUT_OF_BOUNDS       0.1f
 
-#define ROLLING_ADC_FR_POW 5
+#define ROLLING_ADC_FR_POW 2
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW)
 #define ADC_CHANNELS       6
 #define ROLLING_ADC_VALS   (ROLLING_ADC_FRAMES * ADC_CHANNELS)
@@ -51,6 +51,8 @@ typedef struct {
     uint16_t torque;
 } TorqueReq_t;
 
-uint16_t raw_vals[ROLLING_ADC_VALS];
+ADC_Block_t condense();
+void ADC_Init();
+TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params);
 
 #endif

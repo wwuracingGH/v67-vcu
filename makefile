@@ -1,7 +1,7 @@
 CC=arm-none-eabi-gcc
 CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -ffunction-sections -g
 CPPFLAGS= -DSTM32H533xx -Ivendor/CMSIS/Device/ST/STM32H5/Include \
-	 -Ivendor/CMSIS/Core/Include \
+	 -Ivendor/CMSIS/Core/Include -Ivendor
 
 LINKER_FILE=linker_script.ld 
 LDFLAGS=-T $(LINKER_FILE)

@@ -4,16 +4,22 @@
 
 /* must be defined right under the header file inclusion */
 #define _RTOS_IMPLEMENTATION_ kernel rtos_scheduler = {0}; 
-#define RTOS_ALL_STATES -1
+#define RTOS_ALL_STATES     -1
+#define RTOS_NOT_IN_TASK     127
 
 
 #ifndef RTOS_mainTick
 #define RTOS_mainTick 1000
 #endif
 
-#ifndef RTOS_subTick
-#define RTOS_subTick 50
+#ifndef RTOS_subTick_pow
+#define RTOS_subTick_pow 5
 #endif
+
+/*
+ * not cross platform start macros
+ */
+#define RTOS_start_armeabi(CLKSPEED) SysTick_Config(CLKSPEED / ((1 << RTOS_subTick_pow) * RTOS_mainTick)); __enable_irq();
 
 /*
  * Some defaults, but the user can define their own
@@ -58,16 +64,17 @@ typedef uint8_t taskQue_t;
 
 typedef struct {
     void (*callback)();
-    uint16_t countdown;
-    int8_t nextEvent;
+    uint32_t timestamp;
 } rtos_event;
 
 typedef struct {
     void (*callback)();
     uint16_t reset_ms;
     uint16_t counter;
-    uint16_t startTick;
-    uint16_t endTick;
+    
+    uint32_t lastStartTick;
+    uint16_t lastTime;
+    uint16_t priority; 
 } rtos_task;
 
 typedef struct {
@@ -78,15 +85,15 @@ typedef struct {
 
 typedef struct {
     /* Timestamp in subticks */
-    uint32_t timestamp : 31;
-    uint32_t executing : 1;
-
+    volatile uint32_t timestamp;
+    
     volatile taskQue_t taskQue;
-    volatile eventQue_t eventQue;
+    
+    volatile uint8_t currentTask    :  7;
+    volatile uint8_t executing      :  1;
     
     uint8_t numberOfTasks;
-    int8_t firstEventIndex;
-
+    uint8_t numberOfEvents;
     uint8_t numberOfStates;
     uint8_t state;
 
@@ -96,33 +103,21 @@ typedef struct {
 } kernel;
 
 extern kernel rtos_scheduler;
-
-
-/*
- * Not cross platform start macros
- */
-#define RTOS_start_armeabi(CLKSPEED) SysTick_Config(CLKSPEED / (RTOS_subTick * RTOS_mainTick)); __enable_irq();
-
-/*
- * Function macros 
- */
-
-/*
- * Waits for either the specified amount of time or for condition to be true, and if the time has passed
- */
-#define RTOS_waitFor(x, timeout) uint32_t endTimestamp = rtos_scheduler.timestamp + timeout; \
-	while((rtos_scheduler.timestamp < endTimestamp) && !(x));
-
-/*
- * If the timeout ran out
- */
-#define RTOS_timeoutEnded() (endTimestamp >= rtos_scheduler.timestamp)
-
-
 /**
  *  Inits and zeros the RTOS, just in case
  */
 int RTOS_init(void);
+
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getMainTick(void);
+
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getSubTick(void);
+
 
 /**
  *  Adds a state to the car, and then returns the index of the state
@@ -165,39 +160,60 @@ int RTOS_Update(void);
 int RTOS_ExecuteTasks(void);
 
 
+/**
+ *
+ */
+rtos_task* RTOS_currentTask(){
+    if(rtos_scheduler.currentTask == RTOS_NOT_IN_TASK) return NULL;
+
+    return &rtos_scheduler.tasks[rtos_scheduler.currentTask];
+}
 
 inline int RTOS_init(){
     rtos_scheduler.timestamp = 0;
     rtos_scheduler.executing = 0;
+    rtos_scheduler.currentTask = RTOS_NOT_IN_TASK;
 
-    rtos_scheduler.firstEventIndex = -1;
     rtos_scheduler.numberOfStates = 0;
     rtos_scheduler.numberOfTasks = 0;
+    rtos_scheduler.numberOfEvents = 0;
     rtos_scheduler.taskQue = 0;
-    rtos_scheduler.eventQue = 0;
     rtos_scheduler.state = 0;
     
 
     for(int i = 0; i < RTOS_maxEventNum; i++){
-        rtos_scheduler.eventHeap[i].nextEvent = -1;
         rtos_scheduler.eventHeap[i].callback = 0;
-        rtos_scheduler.eventHeap[i].countdown = 0;
+        rtos_scheduler.eventHeap[i].timestamp = 0;
     }
 
     for(int i = 0; i < RTOS_maxStateNum; i++){
         rtos_scheduler.states[i].entry = 0;
         rtos_scheduler.states[i].exit = 0;
         rtos_scheduler.states[i].taskMask = 0;
+        
     }
 
     for (int i = 0; i < RTOS_maxTaskNum; i++){
         rtos_scheduler.tasks[i].callback = 0;
         rtos_scheduler.tasks[i].counter = 0;
         rtos_scheduler.tasks[i].reset_ms = 0;
+        rtos_scheduler.tasks[i].lastStartTick = 0;
+        rtos_scheduler.tasks[i].lastTime = 0;
     }
 
     return 0;
 }
+
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getMainTick(void){ return rtos_scheduler.timestamp >> RTOS_subTick_pow; }
+
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getSubTick(void) { return rtos_scheduler.timestamp & (1 << RTOS_subTick_pow) - 1; }
+
 
 /**
  * adds state to the rtos
@@ -265,72 +281,83 @@ inline int RTOS_scheduleTask(int state, void (*function)(), uint16_t period){
 }
 
 /**
- * schedules an event with a countdown, returns index in the linked list heap
+ * schedules an event with a countdown, returns index in the heap
  */
 inline int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
-    int newEventHandle = 0;
-    while(rtos_scheduler.eventHeap[newEventHandle].callback != 0 && newEventHandle < RTOS_maxEventNum)
-        newEventHandle++;
+    int ti = rtos_scheduler.numberOfEvents;
+    int parent = (ti - 1) >> 1;
     
-    if (newEventHandle == RTOS_maxEventNum) return -1;
-
-    rtos_scheduler.eventHeap[newEventHandle].callback = function;
-    rtos_scheduler.eventHeap[newEventHandle].countdown = countdown;
-    rtos_scheduler.eventHeap[newEventHandle].nextEvent = -1;
-    
-    if(rtos_scheduler.firstEventIndex == -1){
-        rtos_scheduler.firstEventIndex = newEventHandle;
-        return newEventHandle;
+    while(parent >= 0 && rtos_scheduler.eventHeap[parent].timestamp > rtos_scheduler.eventHeap[ti].timestamp){
+        rtos_scheduler.eventHeap[ti].timestamp = rtos_scheduler.eventHeap[parent].timestamp;
+        rtos_scheduler.eventHeap[ti].callback = rtos_scheduler.eventHeap[parent].callback;
+        ti = parent;
+        parent = (ti - 1) >> 1;
     }
 
-    int index = rtos_scheduler.firstEventIndex, last = -1;
+    rtos_scheduler.eventHeap[ti].callback  = function;
+    rtos_scheduler.eventHeap[ti].timestamp = rtos_scheduler.timestamp + (countdown << RTOS_subTick_pow);
 
-    while(index != -1){
-        if(rtos_scheduler.eventHeap[index].countdown > countdown) break;
+    rtos_scheduler.numberOfEvents++;
+    return ti;
+}
 
-        index = rtos_scheduler.eventHeap[index].nextEvent;
-        last = rtos_scheduler.eventHeap[index].nextEvent;
-    }
-
-    if(last == -1){
-        rtos_scheduler.firstEventIndex = newEventHandle;
-    }
+int smallerChild(int index, int len){
+    uint32_t tsi = rtos_scheduler.eventHeap[index].timestamp;
+    uint32_t least, tsl, tsr;
+    if      (((index << 1) + 1) >= len) return -1;
+    else if (((index << 1) + 2) >= len) least = (index << 1) + 1; 
     else {
-        rtos_scheduler.eventHeap[last].nextEvent = newEventHandle;
+        tsl = rtos_scheduler.eventHeap[(index << 1) + 1].timestamp;
+        tsr = rtos_scheduler.eventHeap[(index << 1) + 2].timestamp;
+        least = tsl <= tsr ? (index << 1) + 1 : (index << 1) + 2;
     }
-    
-    rtos_scheduler.eventHeap[newEventHandle].nextEvent = index;
-    
-    return newEventHandle;
+    return rtos_scheduler.eventHeap[least].timestamp < tsi ? least : -1;
 }
 
 /**
  * returns 0 if no remaining tasks
  */
 inline int RTOS_removeFirstEvent(){
-    uint8_t newFirst = rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].nextEvent;
+    int new_size = rtos_scheduler.numberOfEvents - 1;
+    if(new_size == 0) { 
+        rtos_scheduler.eventHeap[0].callback = 0;
+        rtos_scheduler.eventHeap[0].timestamp = 0;
+        return 0;
+    }
     
-    rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].callback = 0;
-    rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].nextEvent = -1;
-    rtos_scheduler.eventHeap[rtos_scheduler.firstEventIndex].countdown = 0;
+    void (*callback)() = rtos_scheduler.eventHeap[new_size].callback;
+    uint32_t timestamp = rtos_scheduler.eventHeap[new_size].timestamp;
     
-    rtos_scheduler.firstEventIndex = newFirst;
-
-    return rtos_scheduler.firstEventIndex == -1;
+    rtos_scheduler.eventHeap[0].callback = callback;
+    rtos_scheduler.eventHeap[0].timestamp = timestamp;
+    
+    rtos_scheduler.eventHeap[new_size].callback = 0;
+    rtos_scheduler.eventHeap[new_size].timestamp = 0;
+    
+    uint32_t i = 0, smc = 0;
+    while((smc = smallerChild(i, new_size)) != -1) {
+        rtos_scheduler.eventHeap[i].callback = rtos_scheduler.eventHeap[smc].callback;
+        rtos_scheduler.eventHeap[i].timestamp = rtos_scheduler.eventHeap[smc].timestamp;
+        i = smc;
+    }
+    
+    rtos_scheduler.eventHeap[i].callback = callback;
+    rtos_scheduler.eventHeap[i].timestamp = timestamp;
+    
+    return new_size;
 }
 
 /**
  * called in ms interrupt context to schedule the tasks and execute the events
  */
 inline int RTOS_Update(){
-    if(rtos_scheduler.timestamp % RTOS_subTick != 0){ 
+    if(RTOS_getSubTick()){ 
         rtos_scheduler.timestamp++;
         return 1;
     }
     rtos_scheduler.timestamp++;
     
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){ 
-
         if((rtos_scheduler.states[rtos_scheduler.state].taskMask >> i) & 0x01) {
             rtos_scheduler.tasks[i].counter--;
             if(rtos_scheduler.tasks[i].counter <= 0){
@@ -338,18 +365,6 @@ inline int RTOS_Update(){
                 rtos_scheduler.tasks[i].counter = rtos_scheduler.tasks[i].reset_ms;
             }
         }
-    }
-
-    int eventpointer = rtos_scheduler.firstEventIndex;
-    while (eventpointer != -1){
-        if (rtos_scheduler.eventHeap[eventpointer].countdown > 0 || rtos_scheduler.eventHeap[eventpointer].callback == 0)
-            break; //move on if no events to execute
-        rtos_scheduler.eventQue |= (1 << eventpointer);
-        eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;
-    }
-    while (eventpointer != -1){
-        rtos_scheduler.eventHeap[eventpointer].countdown--;
-        eventpointer = rtos_scheduler.eventHeap[eventpointer].nextEvent;
     }
 
     return 0;
@@ -363,24 +378,24 @@ inline int RTOS_ExecuteTasks(){
     
     for(int i = 0; i < rtos_scheduler.numberOfTasks; i++){
         if ((rtos_scheduler.taskQue >> i) & 0x1){
-            rtos_scheduler.tasks[i].startTick = rtos_scheduler.timestamp; 
+            rtos_scheduler.currentTask = i;
+            uint32_t startTick = rtos_scheduler.timestamp; 
             rtos_scheduler.tasks[i].callback();
             rtos_scheduler.taskQue &= ~(0x1 << i);
-            rtos_scheduler.tasks[i].endTick = rtos_scheduler.timestamp; 
+            rtos_scheduler.currentTask = RTOS_NOT_IN_TASK;
+            rtos_scheduler.tasks[i].lastStartTick = startTick; 
+            rtos_scheduler.tasks[i].lastTime = rtos_scheduler.timestamp - startTick; 
         }
     }
 
-    for(int i = 0; i < RTOS_maxEventNum; i++){
-        if ((rtos_scheduler.eventQue >> i) & 0x1){
-            rtos_scheduler.eventHeap[i].callback();
-            rtos_scheduler.eventQue &= ~(0x1 << i);
-            RTOS_removeFirstEvent();
+    if(rtos_scheduler.numberOfEvents > 0){
+        if (rtos_scheduler.eventHeap[0].timestamp < rtos_scheduler.timestamp && rtos_scheduler.eventHeap[0].callback != 0){
+            rtos_scheduler.eventHeap[0].callback();
+            rtos_scheduler.numberOfEvents = RTOS_removeFirstEvent();
         }
     }
-
     rtos_scheduler.executing = 0;
     return 0;
 }
 
 #endif
-

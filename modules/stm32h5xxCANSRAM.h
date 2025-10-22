@@ -5,7 +5,7 @@
 typedef struct __attribute__((packed)){
 	uint32_t H0;
 	uint32_t H1;
-	uint8_t data[64]; /* only the first two words of these are set in CAN 2.0 mode */
+	uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
 } FDCAN_Rx_FIFO_Element_Typedef;
 
 typedef struct {
@@ -16,7 +16,7 @@ typedef struct {
 typedef struct __attribute__((packed)){
 	uint32_t H0;
 	uint32_t H1;
-	uint8_t data[64]; /* only the first two words of these are set in CAN 2.0 mode */
+	uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
 } FDCAN_Tx_FIFO_Element_Typedef;
 
 typedef struct {
@@ -87,12 +87,12 @@ typedef struct {
 #define FDCAN_RXBH0_RTR_Pos 		(29UL)
 #define FDCAN_RXBH0_RTR_Msk   		(0x1UL << FDCAN_RXBH0_RTR_Pos) 
 #define FDCAN_RXBH0_RTR        		FDCAN_RXBH0_RTR_Msk
-#define FDCAN_RXBH1_XTD_Pos 		(30UL)
-#define FDCAN_RXBH1_XTD_Msk  		(0x1UL << FDCAN_RXBH0_EXT_Pos) 
-#define FDCAN_RXBH1_XTD          	FDCAN_RXBH1_EXT_Msk
-#define FDCAN_RXBH1_ESI_Pos 		(31UL)
-#define FDCAN_RXBH1_ESI_Msk  		(0x1UL << FDCAN_RXBH0_ESI_Pos) 
-#define FDCAN_RXBH1_ESI          	FDCAN_RXBH1_ESI_Msk
+#define FDCAN_RXBH0_XTD_Pos 		(30UL)
+#define FDCAN_RXBH0_XTD_Msk  		(0x1UL << FDCAN_RXBH0_XTD_Pos) 
+#define FDCAN_RXBH0_XTD          	FDCAN_RXBH0_XTD_Msk
+#define FDCAN_RXBH0_ESI_Pos 		(31UL)
+#define FDCAN_RXBH0_ESI_Msk  		(0x1UL << FDCAN_RXBH0_ESI_Pos) 
+#define FDCAN_RXBH0_ESI          	FDCAN_RXBH0_ESI_Msk
 
 /* HEADER 1 DEFINITIONS */
 #define FDCAN_RXBH1_TS_Pos			(0UL)

@@ -1,7 +1,7 @@
-#include "gpio.h"
 #ifndef STM32H533xx
 #define STM32H533xx
 #endif
+#include "gpio.h"
 #include "stm32h5xx.h"
 
 enum Pin_Mode {
@@ -42,7 +42,7 @@ void GPIO_Init(){
 
 
     GPIOA->PUPDR  = 0;
-    GPIOA->OSPEEDR |= (3 << GPIO_OSPEEDR_OSPEED6_Pos); /* Timing pin should be high speed */
+    GPIOA->OSPEEDR |= (3UL << GPIO_OSPEEDR_OSPEED6_Pos); /* Timing pin should be high speed */
     GPIOA->AFR[1] |= (7UL << GPIO_AFRH_AFSEL9_Pos) | /* USART TX */
                     (7UL << GPIO_AFRH_AFSEL10_Pos) | /* USART RX */
                     (9UL << GPIO_AFRH_AFSEL11_Pos) | /* CAN1 TX  */

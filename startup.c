@@ -289,8 +289,7 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
 extern uint32_t _etext, _sdata, _edata, _sbss, _ebss, _sidata;
 void main(void);
 
-void reset_handler(void)
-{
+void reset_handler(void){
     /* SCB->CPACR, should enable hardware floating point*/
     *(uint32_t*)(0xE000ED88UL) |= ((3UL << 20U)|(3UL << 22U));
 

@@ -1,8 +1,8 @@
 #ifndef STM32H533xx
 #define STM32H533xx
 #endif
+#include "can.h"
 #include "stm32h5xx.h"
-#include "stm32h5xxCANSRAM.h"
 
 void CAN_Init(){
 
@@ -30,18 +30,58 @@ void CAN_Init(){
 	/* clock in is at 125mhz (set in clock config), there are 4 divs and the first seg is 2 long */
     FDCAN1->NBTP = (124 << FDCAN_NBTP_NBRP_Pos) |
                    (1 << FDCAN_NBTP_NTSEG1_Pos) |		
-                   (0 << FDCAN_NBTP_NTSEG2_Pos) |		
+                   (0 << FDCAN_NBTP_NTSEG2_Pos) |
 				   (0 << FDCAN_NBTP_NSJW_Pos);
 
     /* Configure Global Acceptance Filtering to set blank filter */
     FDCAN1->RXGFC |= (0 << FDCAN_RXGFC_ANFS_Pos)|
-    				(0 << FDCAN_RXGFC_ANFE_Pos);
+    				(0 << FDCAN_RXGFC_ANFE_Pos)
+					| FDCAN_RXGFC_F0OM | FDCAN_RXGFC_F1OM;
 
     FDCAN1->TXBC &= ~(1 << FDCAN_TXBC_TFQM_Pos); // clear queue bit
+
+    /* clear sleep bit */
+	FDCAN2->CCCR &= ~(FDCAN_CCCR_CSR);
+	while (FDCAN2->CCCR & FDCAN_CCCR_CSA){};
+
+	/* Enter initialization mode */
+	FDCAN2->CCCR |= FDCAN_CCCR_INIT;
+	while((FDCAN2->CCCR & FDCAN_CCCR_INIT) == 0) {
+		/* Wait for INIT to set */
+	}
+
+	/* Enable the Configuration Change Enable (CCE) bit */
+	FDCAN2->CCCR |= FDCAN_CCCR_CCE;
+	while ((FDCAN2->CCCR & FDCAN_CCCR_CCE) == 0);  /* wait for cce */
+
+	/* TODO: get rid of this */
+	FDCAN2->CCCR |= FDCAN_CCCR_DAR; /* disable automatic retransmission */
+
+	/* clock in is at 125mhz (set in clock config), there are 4 divs and the first seg is 2 long */
+	FDCAN2->NBTP = (124 << FDCAN_NBTP_NBRP_Pos) |
+				   (1 << FDCAN_NBTP_NTSEG1_Pos) |
+				   (0 << FDCAN_NBTP_NTSEG2_Pos) |
+				   (0 << FDCAN_NBTP_NSJW_Pos);
+
+	/* Configure Global Acceptance Filtering to set blank filter */
+	FDCAN2->RXGFC |= (0 << FDCAN_RXGFC_ANFS_Pos)|
+					(0 << FDCAN_RXGFC_ANFE_Pos)
+					| FDCAN_RXGFC_F0OM | FDCAN_RXGFC_F1OM;
+
+	FDCAN2->TXBC &= ~(1 << FDCAN_TXBC_TFQM_Pos); // clear queue bit
+
+	FDCAN1->CCCR |= FDCAN_CCCR_FDOE;
+	FDCAN2->CCCR |= FDCAN_CCCR_FDOE;
 
     /* Exit Initialize Mode */
 	FDCAN1->CCCR &= ~(FDCAN_CCCR_INIT);
     while (FDCAN1->CCCR & FDCAN_CCCR_INIT) {
+    	/* Wait */
+    }
+
+    /* Exit Initialize Mode */
+	FDCAN2->CCCR &= ~(FDCAN_CCCR_INIT);
+    while (FDCAN2->CCCR & FDCAN_CCCR_INIT) {
     	/* Wait */
     }
 }
@@ -56,7 +96,7 @@ void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, ui
 	int j = (FDCAN->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos;
 
 	/* Find the indexed buffer */
-	FDCAN_Tx_FIFO_Element_Typedef *msg = FDCAN == FDCAN1 ? &FDCAN1_RAM->tx_buffers[j] : &FDCAN2_RAM->tx_buffers[j];								// use nicoles buffers from header file
+	FDCAN_Tx_FIFO_Element_Typedef *msg = (FDCAN == FDCAN1) ? &FDCAN1_RAM->tx_buffers[j] : &FDCAN2_RAM->tx_buffers[j];								// use nicoles buffers from header file
 
 	msg->H0 = 0; // 11 bit ID goes to T0
     msg->H0 |= ((uint32_t)id << FDCAN_TXBH0_STDID_Pos);     /* STDID   */
@@ -64,10 +104,54 @@ void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, ui
     msg->H1  = 0;
     msg->H1 |= ((uint32_t)length << FDCAN_TXBH1_DLC_Pos);      /* DLC */
 
-    for(uint8_t i = 0; i < length; i++)	// Copy data to buffer
-    	msg->data[i] = data[i];
+    msg->data[0] = *((uint32_t*)data);
+    msg->data[1] = *(((uint32_t*)data) + 1);
 
-    FDCAN1->TXBAR |= (1UL << j); // Trigger message by writing to TX buffer
+    FDCAN->TXBAR |= (1UL << j); // Trigger message by writing to TX buffer
 
     (void)id;
+}
+
+uint32_t _get_id(FDCAN_Rx_FIFO_Element_Typedef* msg){
+	return (msg->H0 & FDCAN_RXBH0_XTD_Msk) ? (msg->H0 & FDCAN_RXBH0_EXTID_Msk) :
+	        (msg->H0 & FDCAN_RXBH0_STDID_Msk) >> FDCAN_RXBH0_STDID_Pos;
+}
+
+uint8_t _get_dlc(FDCAN_Rx_FIFO_Element_Typedef* msg){
+	return (msg->H1 & FDCAN_RXBH1_DLC_Msk) >> FDCAN_RXBH1_DLC_Pos;
+}
+
+uint32_t* _get_data(FDCAN_Rx_FIFO_Element_Typedef* msg){
+	return msg->data;
+}
+
+void CAN_recieveMessages(void (*processMessage)(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data)){
+	while(FDCAN1->RXF0S & FDCAN_RXF0S_F0FL_Msk){
+		int j = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+		FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo0 + j;
+		processMessage(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
+		FDCAN1->RXF0A |= j;
+		__DSB();
+	}
+	while(FDCAN1->RXF1S & FDCAN_RXF1S_F1FL_Msk){
+		int j = (FDCAN1->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+		FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo1 + j;
+		processMessage(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
+		FDCAN1->RXF1A |= j;
+		__DSB();
+	}
+	while(FDCAN2->RXF0S & FDCAN_RXF0S_F0FL_Msk){
+		int j = (FDCAN2->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+		FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo0 + j;
+		processMessage(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
+		FDCAN2->RXF0A |= j;
+		__DSB();
+	}
+	while(FDCAN2->RXF1S & FDCAN_RXF1S_F1FL_Msk){
+		int j = (FDCAN2->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+		FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo1 + j;
+		processMessage(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
+		FDCAN2->RXF1A |= j;
+		__DSB();
+	}
 }
