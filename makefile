@@ -38,7 +38,7 @@ printf.o: vendor/printf/printf.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) vendor/printf/printf.c -c
 
 control.o: modules/control.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/control.c -c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -O3 $(LDFLAGS) modules/control.c -c 
 
 system_stm32h5xx.o: vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c -c

@@ -6,15 +6,7 @@
 uint16_t raw_vals[ROLLING_ADC_VALS];
 
 void waitus(volatile uint32_t us){
-	/* waits the correct number of clock cycles for 72mhz
-	 * Each loop takes exactly 3 clock cycles
-	 * So 72000/3 = 24000 loop cycles per ms */
-	asm(	"ldr r1, =#13\n"
-	        "mul r1, r0, r1\n"
-	        "waitLoop:\n"
-	        "subs r1, r1, #1\n"
-	        "bne waitLoop\n"
-	);
+    for(volatile int i = us * 10; i > 0; i--);
 }
 
 /* copy of the DAR */
@@ -37,7 +29,10 @@ void ADC_Init(){
 
     /* start the voltage regulator */
     ADC1->CR |= ADC_CR_ADVREGEN;
+    
+    GPIOA->ODR |= 1 << 6;
     waitus(10); /* wait 10us as specified on the datasheet */
+    GPIOA->ODR = ~(1 << 6);
 
     /* calibrate the adc */
     ADC1->CR |= 1UL << ADC_CR_ADCAL_Pos;   
@@ -99,33 +94,36 @@ void ADC_Init(){
 ADC_Block_t condense() {
 	if(ADC1->ISR & ADC_ISR_OVR)
 		ADC1->ISR |= ADC_ISR_OVR;
-	uint32_t aaps1 = 0, aaps2 = 0, aaps3 = 0, aaps4 = 0, afbps = 0, arbps = 0;
-    for(int i = 0; i < ROLLING_ADC_VALS; i += 6){
-        aaps1 += raw_vals[i    ];
-        aaps2 += raw_vals[i + 1];
-        aaps3 += raw_vals[i + 2];
-        aaps4 += raw_vals[i + 3];
-        afbps += raw_vals[i + 4];
-        arbps += raw_vals[i + 5];
+	uint32_t apps12 = 0, apps34 = 0, afrbps = 0;
+    uint32_t* raw2_vals = (uint32_t*)&raw_vals[0];
+    for(; raw2_vals < (raw_vals + ROLLING_ADC_VALS); raw2_vals += 3){
+        apps12 = __UADD16(apps12, raw2_vals[0]);
+        apps34 = __UADD16(apps34, raw2_vals[1]);
+        afrbps = __UADD16(afrbps, raw2_vals[2]);
     }
 
-    ADC_Block_t block = { aaps1 >> ROLLING_ADC_FR_POW, aaps2 >> ROLLING_ADC_FR_POW,
-        aaps3 >> ROLLING_ADC_FR_POW, aaps4 >> ROLLING_ADC_FR_POW, afbps >> ROLLING_ADC_FR_POW,
-             arbps >> ROLLING_ADC_FR_POW};
+    ADC_Block_t block = { 
+        (apps12 & 0xFFFF) >> ROLLING_ADC_FR_POW, 
+        apps12 >> (ROLLING_ADC_FR_POW + 16),
+        (apps34 & 0xFFFF) >> ROLLING_ADC_FR_POW, 
+        apps34 >> (ROLLING_ADC_FR_POW + 16),
+        (afrbps & 0xFFFF) >> ROLLING_ADC_FR_POW, 
+        afrbps >> (ROLLING_ADC_FR_POW + 16),
+    };
 
     return block;
 }
 
-float find_avg_4(float * vals, int min, int max){
-    float avg = 0;
+int find_avg_4(int * vals, int min, int max){
+    int avg = 0;
     for(int i = min; i <= max; i++)
         avg += vals[i];
     avg /= max - min;
     return avg;
 }
 
-float find_avg_4_fst(float * vals, int min, int max){
-    float avg = 0;
+float find_avg_4_fst(int * vals, int min, int max){
+    int avg = 0;
     switch(min){ /* hoping for a faster function on average */
         case 0: 
             avg += vals[0]; 
@@ -149,7 +147,7 @@ float find_avg_4_fst(float * vals, int min, int max){
 }
 
 /* CAS instruction... wish you were here... */
-void sort_dat_4(float * vals){
+void sort_dat_4(int32_t * vals){
     if(vals[0] > vals[2]){
         int tmp = vals[0];
         vals[0] = vals[2];
@@ -181,18 +179,38 @@ void sort_dat_4(float * vals){
     }
 }
 
+ADC_Mult_t get_adc_multiplers(ADC_Bounds_t* bounds) {
+    ADC_Mult_t mult = {0};
+    mult.APPS1_strt = bounds->APPS1_l;
+    mult.APPS2_strt = bounds->APPS2_l;
+    mult.APPS3_strt = bounds->APPS3_l;
+    mult.APPS4_strt = bounds->APPS4_l;
+
+    mult.APPS1_mult = 65536L / ((int32_t)bounds->APPS1_h - bounds->APPS1_l);
+    mult.APPS2_mult = 65536L / ((int32_t)bounds->APPS2_h - bounds->APPS2_l);
+    mult.APPS3_mult = 65536L / ((int32_t)bounds->APPS3_h - bounds->APPS3_l);
+    mult.APPS4_mult = 65536L / ((int32_t)bounds->APPS4_h - bounds->APPS4_l);
+    
+    mult.BPS_f_min = bounds->BPS_f_min;
+    mult.BPS_r_min = bounds->BPS_r_min;
+
+    return mult;
+}
+
 /*  Internal torque request calculation
     returns a mess: 
     low "word": 16 bit unsigned integer 
     high "word": sign (if doing something like regen), and 3 error bits at the top
     */
-TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params) {
+TorqueReq_t calc_torque_request(ADC_Mult_t* mult, ControlParams_t* params) {
+    GPIOA->ODR &= ~(1 << 6);
     ADC_Block_t vals = condense();
+    GPIOA->ODR |= 1 << 6;
 
     TorqueReq_t torque_request = {0, 0};
 
     int braking_pressure = 0;
-    int bse_data_err = (vals.FBPS < bounds.BPS_min) << 1 | (vals.RBPS < bounds.BPS_min);
+    int bse_data_err = (vals.FBPS < mult->BPS_f_min) << 1 | (vals.RBPS < mult->BPS_r_min);
     switch(bse_data_err){
     case 2:
         braking_pressure = vals.RBPS; break;
@@ -204,21 +222,23 @@ TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params) {
         torque_request.flags |= APPS_FAULT_BSE; break;
     }
 
-    float apps[4];
-    apps[0] = (float)(vals.APPS1 - bounds.APPS1_l) / (float)(bounds.APPS1_h - bounds.APPS1_l);
-    apps[1] = (float)(vals.APPS2 - bounds.APPS2_l) / (float)(bounds.APPS2_h - bounds.APPS2_l);
-    apps[2] = (float)(vals.APPS3 - bounds.APPS3_l) / (float)(bounds.APPS3_h - bounds.APPS3_l);
-    apps[3] = (float)(vals.APPS4 - bounds.APPS4_l) / (float)(bounds.APPS4_h - bounds.APPS4_l);
+    int32_t apps[4];
+    apps[0] = ((int32_t)vals.APPS1 - (int32_t)mult->APPS1_strt) * mult->APPS1_mult;
+    apps[1] = ((int32_t)vals.APPS2 - (int32_t)mult->APPS2_strt) * mult->APPS2_mult;
+    apps[2] = ((int32_t)vals.APPS3 - (int32_t)mult->APPS3_strt) * mult->APPS3_mult;
+    apps[3] = ((int32_t)vals.APPS4 - (int32_t)mult->APPS4_strt) * mult->APPS4_mult;
 
-    LOG("%f %f %f %f \n", apps[0], apps[1], apps[2], apps[3]);
+    //LOG("%d %d %d %d \n", apps[0], apps[1], apps[2], apps[3]);
 
+    GPIOA->ODR &= ~(1 << 6);
     sort_dat_4(apps);
+    GPIOA->ODR |= (1 << 6);
 
     int mindex = 3;
     int maxdex = 1;
     
     for(int i = 0; i < 4; i++){
-        int oob = (apps[i] > (APPS_OUT_OF_BOUNDS + 1)) || (apps[i] < -(APPS_OUT_OF_BOUNDS));
+        int oob = (apps[i] > (APPS_OUT_OF_BOUNDS + (1 << 16))) || (apps[i] < -(APPS_OUT_OF_BOUNDS));
         if(!oob) {
             if(i < mindex)
                 mindex = i;
@@ -227,13 +247,13 @@ TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params) {
         }
     }
 
-    if(mindex == maxdex){
+    if(mindex >= maxdex){
         torque_request.flags |= APPS_FAULT_BOUNDS;
     }
 
-    float avg = find_avg_4_fst(apps, mindex, maxdex);
+    int avg = find_avg_4(apps, mindex, maxdex);
 
-    while(apps[maxdex] - apps[mindex] > 0.1f){
+    while(apps[maxdex] - apps[mindex] > 6553 && (maxdex >= mindex)){ /* 10% in */
         if(apps[maxdex] + apps[mindex] > avg * 2){
             maxdex--;
         }
@@ -243,18 +263,22 @@ TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params) {
         avg = find_avg_4(apps, mindex, maxdex);
     }
 
+    //LOG("%d %d %d %d %d %d \n", apps[0], apps[1], apps[2], apps[3], maxdex, mindex);
+
     if(mindex == maxdex){
         torque_request.flags |= APPS_FAULT_DELTA;
     }
 
-    if(avg < 0.0f) avg = 0.0f;
-    if(avg > 1.0f) avg = 1.0f;
+    if(avg < 0) avg = 0;
+    if(avg > 65536) avg = 65536;
 
-    if(avg > 0.25f && braking_pressure > params.brake_threashold) {
+    if(avg > APPS_BPS_PLAUS && braking_pressure > params->brake_threashold) {
         torque_request.flags |= APPS_FAULT_PLAUS;
     }
 
-    torque_request.torque = avg * params.max_torque;
+    torque_request.torque = (avg * params->max_torque) >> 16;
+
+    //LOG("%d, %d\n", torque_request.torque, torque_request.flags);
 
     return torque_request;
 }

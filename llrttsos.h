@@ -118,7 +118,6 @@ uint32_t RTOS_getMainTick(void);
  */
 uint32_t RTOS_getSubTick(void);
 
-
 /**
  *  Adds a state to the car, and then returns the index of the state
  */
@@ -161,10 +160,10 @@ int RTOS_ExecuteTasks(void);
 
 
 /**
- *
+ * Returns the current task
  */
 rtos_task* RTOS_currentTask(){
-    if(rtos_scheduler.currentTask == RTOS_NOT_IN_TASK) return NULL;
+    if(rtos_scheduler.currentTask == RTOS_NOT_IN_TASK) return 0;
 
     return &rtos_scheduler.tasks[rtos_scheduler.currentTask];
 }

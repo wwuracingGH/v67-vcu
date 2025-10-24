@@ -32,18 +32,19 @@ void blinky(){
 }
 
 ADC_Bounds_t bounds = {
-    895,
-    1819,
-    2477, 
-    1563,
-    780,
-    2256,
-    2521,
-    1397,
+    1099,
+    2571,
+    2553, 
+    1050,
+    1319,
+    3466,
+    2406,
+    582,
     500,
     3500
 };
 
+ADC_Mult_t mult = { 0 };
 ControlParams_t cparams = { 1000, 0, 0, 100};
 
 void say_hello(){
@@ -52,8 +53,10 @@ void say_hello(){
     //CAN_sendmessage(FDCAN1, 2, 6, h);
     //CAN_sendmessage(FDCAN2, 2, 6, w);
     
-
-    TorqueReq_t torque_req = calc_torque_request(bounds, cparams);
+    GPIOA->ODR |= 1 << 6;
+    TorqueReq_t torque_req = calc_torque_request(&mult, &cparams);
+    GPIOA->ODR &= ~(1 << 6);
+    
     ADC_Block_t b = condense();
     LOGLN("%d %d %d %d %d %d", b.APPS1, b.APPS2, b.APPS3, b.APPS4, torque_req.torque, torque_req.flags);
 }
@@ -94,10 +97,12 @@ int main(void) {
 
     int default_state = RTOS_addState(0,0);
     RTOS_scheduleTask(default_state, blinky, 100);
-    RTOS_scheduleTask(default_state, say_hello, 20);
+    RTOS_scheduleTask(default_state, say_hello, 500);
     RTOS_scheduleTask(default_state, processCAN, 10);
 
     RTOS_switchState(default_state);
+
+    mult = get_adc_multiplers(&bounds);
 
     RTOS_start_armeabi(SYS_CLOCK);
 

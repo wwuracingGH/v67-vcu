@@ -10,9 +10,11 @@
 
 #define APPS_FLAGS_NEG      (1 << 0) /* maybe useful in the future? */
 
-#define APPS_OUT_OF_BOUNDS       0.1f
+#define APPS_OUT_OF_BOUNDS       6553L
+#define APPS_DELTA               6553L
+#define APPS_BPS_PLAUS           16384L
 
-#define ROLLING_ADC_FR_POW 2
+#define ROLLING_ADC_FR_POW 4
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW)
 #define ADC_CHANNELS       6
 #define ROLLING_ADC_VALS   (ROLLING_ADC_FRAMES * ADC_CHANNELS)
@@ -35,9 +37,22 @@ typedef struct {
     uint16_t APPS3_h;
     uint16_t APPS4_l;
     uint16_t APPS4_h;
-    uint16_t BPS_min;
-    uint16_t BPS_max;
+    uint16_t BPS_f_min;
+    uint16_t BPS_r_min;
 } ADC_Bounds_t;
+
+typedef struct {
+    uint16_t APPS1_strt;
+    uint16_t APPS2_strt;
+    uint16_t APPS3_strt;
+    uint16_t APPS4_strt;
+    int32_t APPS1_mult;
+    int32_t APPS2_mult;
+    int32_t APPS3_mult;
+    int32_t APPS4_mult;
+    uint16_t BPS_f_min;
+    uint16_t BPS_r_min;
+} ADC_Mult_t;
 
 typedef struct {
     uint16_t max_torque;
@@ -51,8 +66,10 @@ typedef struct {
     uint16_t torque;
 } TorqueReq_t;
 
-ADC_Block_t condense();
 void ADC_Init();
-TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params);
+ADC_Mult_t get_adc_multiplers(ADC_Bounds_t* bounds);
+
+ADC_Block_t condense();
+TorqueReq_t calc_torque_request(ADC_Mult_t* bounds, ControlParams_t* params);
 
 #endif
