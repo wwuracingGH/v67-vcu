@@ -8,6 +8,7 @@
 #include "modules/logging.h"
 #include "modules/control.h"
 #include "modules/can.h"
+#include "modules/flash.h"
 #include "vendor/printf/printf.h"
 _RTOS_IMPLEMENTATION_
 
@@ -58,26 +59,7 @@ void say_hello(){
     LOGLN("%d %d %d %d %d %d", b.APPS1, b.APPS2, b.APPS3, b.APPS4, torque_req.torque, torque_req.flags);
 }
 
-void whattodowithCAN(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data){
-	(void)bus;
-	(void)dlc;
-	(void)data;
-
-	uint8_t * datastr;
-	datastr = data;
-
-	char *h = "hhhh";
-	switch(id){
-	default:
-	case 111:
-		LOG(h);
-		break;
-	}
-}
-
-
 void processCAN(){
-    CAN_recieveMessages(whattodowithCAN);
 }
 
 int main(void) {
@@ -103,6 +85,24 @@ int main(void) {
 
     LOG("Hello World!\n");
     LOGLN("CLOCK CHECK: %d", SysTick->LOAD + 1);
+
+	char* hi = "Hello World";
+	char* bp = (char*) 0x09017FFF;
+
+	for (int i = 0; i < 12; i++) {
+		if (hi[i] == bp[i]) {
+			LOG("Reboot: Good at %d.", i);
+		}
+	}
+
+	FLASH_WriteSector(hi, 0, 12);
+	
+	for (int i = 0; i < 12; i++) {
+		if (hi[i] == bp[i]) {
+			LOG("After Write: Good at %d.", i);
+		}
+	}
+
     while(1){
         RTOS_ExecuteTasks();
     }

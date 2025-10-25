@@ -16,7 +16,7 @@ OBJS = 	startup.o \
 
 all: $(BINARY)
 
-$(BINARY): blinky_test.o startup.o gpio.o can.o logging.o printf.o control.o system_stm32h5xx.o
+$(BINARY): blinky_test.o startup.o gpio.o can.o logging.o printf.o control.o system_stm32h5xx.o flash.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
 startup.o: startup.c
@@ -56,12 +56,12 @@ cleanall:
 
 .PHONY: program
 program:
-	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "program $(BINARY) verify reset exit"
+	openocd -f interface/stlink.cfg -f target/stm32h5x.cfg -c "program $(BINARY) verify reset exit"
 
 .PHONY: debug
 debug:
-	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg  
+	openocd -f interface/stlink.cfg -f target/stm32h5x.cfg  
 
 .PHONY: reset
 reset:
-	openocd -f interface/stlink.cfg -f target/stm32f0x.cfg -c "reset"
+	openocd -f interface/stlink.cfg -f target/stm32h5x.cfg -c "reset"

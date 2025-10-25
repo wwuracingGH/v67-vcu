@@ -210,8 +210,6 @@ TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params) {
     apps[2] = (float)(vals.APPS3 - bounds.APPS3_l) / (float)(bounds.APPS3_h - bounds.APPS3_l);
     apps[3] = (float)(vals.APPS4 - bounds.APPS4_l) / (float)(bounds.APPS4_h - bounds.APPS4_l);
 
-    LOG("%f %f %f %f \n", apps[0], apps[1], apps[2], apps[3]);
-
     sort_dat_4(apps);
 
     int mindex = 3;
