@@ -11,7 +11,7 @@
 #define APPS_FLAGS_NEG      (1 << 0) /* maybe useful in the future? */
 
 #define APPS_OUT_OF_BOUNDS       6553L
-#define APPS_DELTA               6553L
+#define APPS_MAX_DELTA           6553L
 #define APPS_BPS_PLAUS           16384L
 
 #define ROLLING_ADC_FR_POW 4
@@ -68,8 +68,8 @@ typedef struct {
 
 void ADC_Init();
 ADC_Mult_t get_adc_multiplers(ADC_Bounds_t* bounds);
-
 ADC_Block_t condense();
+
 TorqueReq_t calc_torque_request(ADC_Mult_t* bounds, ControlParams_t* params);
 
 #endif

@@ -114,34 +114,10 @@ ADC_Block_t condense() {
     return block;
 }
 
-int find_avg_4(int * vals, int min, int max){
+int find_avg_4(int32_t * vals, int min, int max){
     int avg = 0;
     for(int i = min; i <= max; i++)
         avg += vals[i];
-    avg /= max - min;
-    return avg;
-}
-
-float find_avg_4_fst(int * vals, int min, int max){
-    int avg = 0;
-    switch(min){ /* hoping for a faster function on average */
-        case 0: 
-            avg += vals[0]; 
-            if(0 >= max) break;
-            // fall through
-        case 1: 
-            avg += vals[1]; 
-            if(1 >= max) break;
-            // fall through
-        case 2: 
-            avg += vals[2]; 
-            if(2 >= max) break;
-            // fall through
-        case 3: 
-            avg += vals[3]; 
-            if(3 >= max) break;
-    }
-        
     avg /= max - min;
     return avg;
 }
@@ -253,7 +229,7 @@ TorqueReq_t calc_torque_request(ADC_Mult_t* mult, ControlParams_t* params) {
 
     int avg = find_avg_4(apps, mindex, maxdex);
 
-    while(apps[maxdex] - apps[mindex] > 6553 && (maxdex >= mindex)){ /* 10% in */
+    while(apps[maxdex] - apps[mindex] > APPS_MAX_DELTA && (maxdex >= mindex)){ /* 10% in */
         if(apps[maxdex] + apps[mindex] > avg * 2){
             maxdex--;
         }
