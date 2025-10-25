@@ -34,6 +34,9 @@ gpio.o: modules/gpio.c
 can.o: modules/can.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/can.c -c
 
+flash.o: modules/can.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/flash.c -c
+
 printf.o: vendor/printf/printf.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) vendor/printf/printf.c -c
 
