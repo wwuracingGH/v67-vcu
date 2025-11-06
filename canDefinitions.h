@@ -3,7 +3,7 @@
 
 /*
  * DEFINITIONS for motor controller usage as defined in this pdf:
- * https://app.box.com/s/vf9259qlaadhzxqiqrt5cco8xpsn84hk/file/27334613044
+ * https://www.cascadiamotion.com/_files/ugd/b5e2cb_e731a297509a4b2786cea7ef36199b7f.pdf
  */ 
 
 #define MC_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))

@@ -1,5 +1,5 @@
 CC=arm-none-eabi-gcc
-CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -ffunction-sections -g
+CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -Wextra -ffunction-sections -g
 CPPFLAGS= -DSTM32H533xx -Ivendor/CMSIS/Device/ST/STM32H5/Include \
 	 -Ivendor/CMSIS/Core/Include -Ivendor
 
@@ -50,6 +50,14 @@ clean:
 .PHONY: cleanall
 cleanall:
 	rm -f *.o *.elf
+
+.PHONY: lint
+lint:
+	cpplint --linelength=100 main.c startup.c modules/*
+
+.PHONY: check
+check:
+	cppcheck main.c --check-level=exhaustive --force --enable=all $(CPPFLAGS)
 
 .PHONY: program
 program:

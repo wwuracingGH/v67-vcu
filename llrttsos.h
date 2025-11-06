@@ -168,6 +168,20 @@ rtos_task* RTOS_currentTask(){
     return &rtos_scheduler.tasks[rtos_scheduler.currentTask];
 }
 
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getMainTick(void){ 
+    return rtos_scheduler.timestamp >> RTOS_subTick_pow; 
+}
+
+/**
+ * Returns main tick part of the tick var 
+ */
+uint32_t RTOS_getSubTick(void) { 
+    return rtos_scheduler.timestamp & ((1 << RTOS_subTick_pow) - 1); 
+}
+
 inline int RTOS_init(){
     rtos_scheduler.timestamp = 0;
     rtos_scheduler.executing = 0;
@@ -202,17 +216,6 @@ inline int RTOS_init(){
 
     return 0;
 }
-
-/**
- * Returns main tick part of the tick var 
- */
-uint32_t RTOS_getMainTick(void){ return rtos_scheduler.timestamp >> RTOS_subTick_pow; }
-
-/**
- * Returns main tick part of the tick var 
- */
-uint32_t RTOS_getSubTick(void) { return rtos_scheduler.timestamp & (1 << RTOS_subTick_pow) - 1; }
-
 
 /**
  * adds state to the rtos
@@ -302,7 +305,7 @@ inline int RTOS_scheduleEvent(void (*function)(), uint16_t countdown){
 
 int smallerChild(int index, int len){
     uint32_t tsi = rtos_scheduler.eventHeap[index].timestamp;
-    uint32_t least, tsl, tsr;
+    int least, tsl, tsr;
     if      (((index << 1) + 1) >= len) return -1;
     else if (((index << 1) + 2) >= len) least = (index << 1) + 1; 
     else {
@@ -333,7 +336,7 @@ inline int RTOS_removeFirstEvent(){
     rtos_scheduler.eventHeap[new_size].callback = 0;
     rtos_scheduler.eventHeap[new_size].timestamp = 0;
     
-    uint32_t i = 0, smc = 0;
+    int i = 0, smc = 0;
     while((smc = smallerChild(i, new_size)) != -1) {
         rtos_scheduler.eventHeap[i].callback = rtos_scheduler.eventHeap[smc].callback;
         rtos_scheduler.eventHeap[i].timestamp = rtos_scheduler.eventHeap[smc].timestamp;

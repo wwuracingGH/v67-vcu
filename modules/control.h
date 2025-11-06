@@ -1,8 +1,31 @@
-#ifndef _CONTROL_H_
-#define _CONTROL_H_
+/*
+ * Nicole Swierstra
+ * V67 Control Algorithms
+ * 
+ * This file contains definitions and algorithms for calculating driver input and
+ * turning it into control
+ *
+ * ============= ADC Handling ===============
+ * ADCs are set up to do continuous conversion with the DMA in the init function
+ * 
+ * =========== APPS Multipliers =============
+ * A multiplication vector is gotten for remapping the apps using fixed point 
+ * multiplication, and then stored somewhere else
+ * 
+ * =========== Torque Request ===============
+ * Calculated with fixed point multiplication for maximum speed, <3us. also checks
+ * for apps sensor faults
+ * 
+ * ======= Vehicle Dynamics Modeling ======== 
+ * Coming soon, maybe
+ */
+
+#ifndef _MODULES_CONTROL_H_
+#define _MODULES_CONTROL_H_
 
 #include <stdint.h>
 
+#define APPS_FAULT_MASK     0xFF00
 #define APPS_FAULT_BOUNDS   (1 << 15)
 #define APPS_FAULT_DELTA    (1 << 14)
 #define APPS_FAULT_PLAUS    (1 << 13)
@@ -66,10 +89,37 @@ typedef struct {
     uint16_t torque;
 } TorqueReq_t;
 
-void ADC_Init();
-ADC_Mult_t get_adc_multiplers(ADC_Bounds_t* bounds);
-ADC_Block_t condense();
+/* TODO */
+typedef struct {
+    uint32_t dynamicState;
+} VehicleDynamicState_t;
 
-TorqueReq_t calc_torque_request(ADC_Mult_t* bounds, ControlParams_t* params);
+/* TODO */
+typedef struct {
+    uint32_t dynamicParams;
+} VehicleDynamicParams_t;
+
+void CTRL_ADCinit();
+
+/*
+ * Returns a multiplier object that can be stored and used for apps calculation
+ * 
+ * Takes in the bounds to get the multipliers from 
+ */
+ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds);
+
+/*
+ * Only exposed for debugging, can be hidden if raw apps values aren't necessary
+ */
+ADC_Block_t CTRL_condense();
+
+/* 
+ * Returns a torque request struct containing the fault flags and calculated torque request
+ * The torque request is non-zero if there's a fault, so be sure to check
+ * 
+ * Takes in the multipliers for apps calculation and the parameters for torque calculation,
+ * as well as an upper bound on torque
+ */
+TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound);
 
 #endif
