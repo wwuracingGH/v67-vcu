@@ -33,7 +33,7 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
 
 	while(FLASH->NSSR & FLASH_SR_BSY){}; /* wait for the erase to finish */
-
+ 
 	FLASH->NSCR &= ~FLASH_CR_SER_Msk; /* Tell the flash we're no longer doing a sector erase */
 
 	FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
@@ -53,4 +53,55 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 	FLASH->NSCR &= ~FLASH_CR_PG_Msk; /* clear programming bit */
 
 	FLASH->NSCR |= FLASH_CR_LOCK; /* Lock the flash while we're not using it */
+};
+
+void FLASH_EraseHighCycle() {
+    while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
+
+    if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
+	    FLASH_Init();
+    }
+
+    FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
+    
+    for (int i = 24; i < 32; i++) {
+	FLASH->NSCR |= FLASH_CR_BKSEL; /* Select bank 2 */
+
+	FLASH->NSCR |= FLASH_CR_SER; /* Tell flash we're doing a sector erase */
+
+	FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
+
+	FLASH->NSCR |= ((i << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
+
+	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
+
+	while(FLASH->NSSR & FLASH_SR_BSY){}; /* wait for the erase to finish */
+
+	FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
+    }
+	
+    FLASH->NSCR &= ~FLASH_CR_SER; /* Clear sector erase bit. */
+
+    while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
+
+    FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
+
+    if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
+	FLASH_Init();
+    }
+    
+    if (!(FLASH->NSCR & FLASH_CR_PG)) { /* Tell the flash we're gonna program if we haven't yet */
+	    FLASH->NSCR |= FLASH_CR_PG;
+    }
+
+    int* flash_start = (int*)0x0900C000; 
+    int total_bytes = (0x0901FFFF - 0x0900C000) / 8;
+    for(int i = 0; i <= total_bytes; i++) {
+	flash_start[i] = 0xFF;
+	while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
+    }	
+
+    FLASH->NSCR &= ~FLASH_CR_PG_Msk; /* clear programming bit */
+
+    FLASH->NSCR |= FLASH_CR_LOCK; /* Lock the flash while we're not using it */
 };

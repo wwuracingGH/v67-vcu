@@ -13,4 +13,9 @@ void FLASH_Init();
  */
 void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len);
 
+/*
+ * Clears all high cycle data.
+ */
+void FLASH_EraseHighCycle();
+
 #endif
