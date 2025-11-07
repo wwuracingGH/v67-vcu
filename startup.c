@@ -11,13 +11,14 @@
 void reset_handler(void);
 void default_handler(void);
 
+void nmi_handler(void);
+void hard_fault_handler(void);
+void mem_manage(void);
+void bus_fault(void);
+void usage_fault(void);
+void secure_fault(void);
+
 // Cortex-M system exceptions
-void nmi_handler(void) __attribute__((weak, alias("default_handler")));
-void hard_fault_handler(void) __attribute__((weak, alias("default_handler")));
-void mem_manage(void) __attribute__((weak, alias("default_handler")));
-void bus_fault(void) __attribute__((weak, alias("default_handler")));
-void usage_fault(void) __attribute__((weak, alias("default_handler")));
-void secure_fault(void) __attribute__((weak, alias("default_handler")));
 void svcall_handler(void) __attribute__((weak, alias("default_handler")));
 void debug_monitor_handler(void) __attribute__((weak, alias("default_handler")));
 void pendsv_handler(void) __attribute__((weak, alias("default_handler")));
@@ -319,6 +320,13 @@ void default_handler(void)
 {
     while(1);
 }
+
+void nmi_handler(void) { while (1); }
+void hard_fault_handler(void) { while (1); }
+void mem_manage(void) { while (1); }
+void bus_fault(void) { while (1); }
+void usage_fault(void) { while (1); }
+void secure_fault(void) { while (1); }
 
 extern void* memset(void* b, int c, unsigned int len)
 {

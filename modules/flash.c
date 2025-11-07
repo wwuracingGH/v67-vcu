@@ -5,8 +5,8 @@
  * Unlocks the flash to be able to write to it 
  */
 void FLASH_Init() {
-  FLASH->NSKEYR = 0x45670123;
-  FLASH->NSKEYR = 0xCDEF89AB;
+  	FLASH->NSKEYR = 0x45670123;
+	FLASH->NSKEYR = 0xCDEF89AB;
 };
 
 /*
@@ -28,7 +28,9 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 
 	FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
 
-	FLASH->NSCR |= ((page_start << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
+	uint32_t sector = 31 - page_start;
+
+	FLASH->NSCR |= ((sector << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
 
 	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
 
@@ -42,9 +44,9 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 		FLASH->NSCR |= FLASH_CR_PG;
 	}
 
-	uint32_t* page_mem_addr = (uint32_t*) 0x09017FFF + (page_start * 0x60000U); /*Bank 2 base + page_num * Page size */
+	uint32_t* page_mem_addr = ((uint32_t*)0x0900C000) + (page_start * 0x1800U); /*Bank 2 base + page_num * Page size */
 
-	for(uint32_t i = 0; i < len/4; i++) {
+	for (uint32_t i = 0; i < len / 4; i++) {
 		page_mem_addr[i] = ((uint32_t*)src)[i];
 	}
 
@@ -65,40 +67,40 @@ void FLASH_EraseHighCycle() {
     FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
     
     for (int i = 24; i < 32; i++) {
-	FLASH->NSCR |= FLASH_CR_BKSEL; /* Select bank 2 */
+    	FLASH->NSCR |= FLASH_CR_BKSEL; /* Select bank 2 */
 
-	FLASH->NSCR |= FLASH_CR_SER; /* Tell flash we're doing a sector erase */
+    	FLASH->NSCR |= FLASH_CR_SER; /* Tell flash we're doing a sector erase */
 
-	FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
+    	FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
 
-	FLASH->NSCR |= ((i << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
+    	FLASH->NSCR |= ((i << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
 
-	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
+    	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
 
-	while(FLASH->NSSR & FLASH_SR_BSY){}; /* wait for the erase to finish */
+    	while(FLASH->NSSR & FLASH_SR_BSY); /* wait for the erase to finish */
 
-	FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
+    	FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
     }
 	
     FLASH->NSCR &= ~FLASH_CR_SER; /* Clear sector erase bit. */
 
-    while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
+    while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)); /* Wait for flash to be avaliable */
 
     FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
 
     if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
-	FLASH_Init();
+    	FLASH_Init();
     }
     
     if (!(FLASH->NSCR & FLASH_CR_PG)) { /* Tell the flash we're gonna program if we haven't yet */
 	    FLASH->NSCR |= FLASH_CR_PG;
     }
 
-    int* flash_start = (int*)0x0900C000; 
-    int total_bytes = (0x0901FFFF - 0x0900C000) / 8;
-    for(int i = 0; i <= total_bytes; i++) {
-	flash_start[i] = 0xFF;
-	while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
+    uint32_t* flash_start = (uint32_t*)0x0900C000;
+    volatile uint32_t total_words = 0xC000 / 4; /* 0x3000 */
+    for(uint32_t i = 0; i < total_words; i++) {
+    	flash_start[i] = 0xFFFFFFFF;
+    	while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
     }	
 
     FLASH->NSCR &= ~FLASH_CR_PG_Msk; /* clear programming bit */
