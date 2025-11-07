@@ -1,5 +1,5 @@
 CC=arm-none-eabi-gcc
-CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -ffunction-sections -g
+CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -Wextra -ffunction-sections -g
 CPPFLAGS= -DSTM32H533xx -Ivendor/CMSIS/Device/ST/STM32H5/Include \
 	 -Ivendor/CMSIS/Core/Include -Ivendor
 
@@ -16,14 +16,14 @@ OBJS = 	startup.o \
 
 all: $(BINARY)
 
-$(BINARY): blinky_test.o startup.o gpio.o can.o logging.o printf.o control.o system_stm32h5xx.o flash.o
+$(BINARY): main.o startup.o gpio.o can.o logging.o printf.o control.o system_stm32h5xx.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
 startup.o: startup.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) startup.c -c
 
-blinky_test.o: blinky_test.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) blinky_test.c -c
+main.o: main.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) main.c -c
 
 logging.o: modules/logging.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/logging.c -c
@@ -41,7 +41,7 @@ printf.o: vendor/printf/printf.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) vendor/printf/printf.c -c
 
 control.o: modules/control.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/control.c -c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -O3 $(LDFLAGS) modules/control.c -c 
 
 system_stm32h5xx.o: vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) vendor/CMSIS/Device/ST/STM32H5/Source/Templates/system_stm32h5xx.c -c
@@ -53,6 +53,14 @@ clean:
 .PHONY: cleanall
 cleanall:
 	rm -f *.o *.elf
+
+.PHONY: lint
+lint:
+	cpplint --linelength=100 main.c startup.c modules/*
+
+.PHONY: check
+check:
+	cppcheck main.c --check-level=exhaustive --force --enable=all $(CPPFLAGS)
 
 .PHONY: program
 program:

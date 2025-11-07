@@ -1,8 +1,31 @@
-#ifndef _CONTROL_H_
-#define _CONTROL_H_
+/*
+ * Nicole Swierstra
+ * V67 Control Algorithms
+ * 
+ * This file contains definitions and algorithms for calculating driver input and
+ * turning it into control
+ *
+ * ============= ADC Handling ===============
+ * ADCs are set up to do continuous conversion with the DMA in the init function
+ * 
+ * =========== APPS Multipliers =============
+ * A multiplication vector is gotten for remapping the apps using fixed point 
+ * multiplication, and then stored somewhere else
+ * 
+ * =========== Torque Request ===============
+ * Calculated with fixed point multiplication for maximum speed, <3us. also checks
+ * for apps sensor faults
+ * 
+ * ======= Vehicle Dynamics Modeling ======== 
+ * Coming soon, maybe
+ */
+
+#ifndef _MODULES_CONTROL_H_
+#define _MODULES_CONTROL_H_
 
 #include <stdint.h>
 
+#define APPS_FAULT_MASK     0xFF00
 #define APPS_FAULT_BOUNDS   (1 << 15)
 #define APPS_FAULT_DELTA    (1 << 14)
 #define APPS_FAULT_PLAUS    (1 << 13)
@@ -10,9 +33,11 @@
 
 #define APPS_FLAGS_NEG      (1 << 0) /* maybe useful in the future? */
 
-#define APPS_OUT_OF_BOUNDS       0.1f
+#define APPS_OUT_OF_BOUNDS       6553L
+#define APPS_MAX_DELTA           6553L
+#define APPS_BPS_PLAUS           16384L
 
-#define ROLLING_ADC_FR_POW 2
+#define ROLLING_ADC_FR_POW 4
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW)
 #define ADC_CHANNELS       6
 #define ROLLING_ADC_VALS   (ROLLING_ADC_FRAMES * ADC_CHANNELS)
@@ -35,9 +60,22 @@ typedef struct {
     uint16_t APPS3_h;
     uint16_t APPS4_l;
     uint16_t APPS4_h;
-    uint16_t BPS_min;
-    uint16_t BPS_max;
+    uint16_t BPS_f_min;
+    uint16_t BPS_r_min;
 } ADC_Bounds_t;
+
+typedef struct {
+    uint16_t APPS1_strt;
+    uint16_t APPS2_strt;
+    uint16_t APPS3_strt;
+    uint16_t APPS4_strt;
+    int32_t APPS1_mult;
+    int32_t APPS2_mult;
+    int32_t APPS3_mult;
+    int32_t APPS4_mult;
+    uint16_t BPS_f_min;
+    uint16_t BPS_r_min;
+} ADC_Mult_t;
 
 typedef struct {
     uint16_t max_torque;
@@ -51,8 +89,37 @@ typedef struct {
     uint16_t torque;
 } TorqueReq_t;
 
-ADC_Block_t condense();
-void ADC_Init();
-TorqueReq_t calc_torque_request(ADC_Bounds_t bounds, ControlParams_t params);
+/* TODO */
+typedef struct {
+    uint32_t dynamicState;
+} VehicleDynamicState_t;
+
+/* TODO */
+typedef struct {
+    uint32_t dynamicParams;
+} VehicleDynamicParams_t;
+
+void CTRL_ADCinit();
+
+/*
+ * Returns a multiplier object that can be stored and used for apps calculation
+ * 
+ * Takes in the bounds to get the multipliers from 
+ */
+ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds);
+
+/*
+ * Only exposed for debugging, can be hidden if raw apps values aren't necessary
+ */
+ADC_Block_t CTRL_condense();
+
+/* 
+ * Returns a torque request struct containing the fault flags and calculated torque request
+ * The torque request is non-zero if there's a fault, so be sure to check
+ * 
+ * Takes in the multipliers for apps calculation and the parameters for torque calculation,
+ * as well as an upper bound on torque
+ */
+TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound);
 
 #endif

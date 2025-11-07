@@ -2,30 +2,30 @@
 #define __STM32_H5_CANSRAM__
 #include <stdint.h>
 
-typedef struct __attribute__((packed)){
-	uint32_t H0;
-	uint32_t H1;
-	uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
+typedef struct __attribute__((packed)) {
+    uint32_t H0;
+    uint32_t H1;
+    uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
 } FDCAN_Rx_FIFO_Element_Typedef;
 
 typedef struct {
-	uint32_t E0;
-	uint32_t E1;
+    uint32_t E0;
+    uint32_t E1;
 } FDCAN_Tx_FIFO_Event_Typedef;
 
-typedef struct __attribute__((packed)){
-	uint32_t H0;
-	uint32_t H1;
-	uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
+typedef struct __attribute__((packed)) {
+    uint32_t H0;
+    uint32_t H1;
+    uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
 } FDCAN_Tx_FIFO_Element_Typedef;
 
 typedef struct {
-	uint32_t 			sid_filter[28];
-	uint64_t 			exid_filter[8];
-	FDCAN_Rx_FIFO_Element_Typedef 	rx_fifo0[3];
-	FDCAN_Rx_FIFO_Element_Typedef 	rx_fifo1[3];
-	FDCAN_Tx_FIFO_Event_Typedef	tx_event_fifo[3];
-	FDCAN_Tx_FIFO_Element_Typedef 	tx_buffers[3];
+    uint32_t 			sid_filter[28];
+    uint64_t 			exid_filter[8];
+    FDCAN_Rx_FIFO_Element_Typedef 	rx_fifo0[3];
+    FDCAN_Rx_FIFO_Element_Typedef 	rx_fifo1[3];
+    FDCAN_Tx_FIFO_Event_Typedef	tx_event_fifo[3];
+    FDCAN_Tx_FIFO_Element_Typedef 	tx_buffers[3];
 } FDCAN_SRAM_Typedef;
 
 
@@ -43,19 +43,19 @@ typedef struct {
 
 /* HEADER 0 DEFINITIONS */
 #define FDCAN_TXBH0_EXTID_Pos 		(0UL)
-#define FDCAN_TXBH0_EXTID_Msk   	(0x0FFFFFFFUL << FDCAN_TXBH0_EXTID_Pos) 
+#define FDCAN_TXBH0_EXTID_Msk   	(0x0FFFFFFFUL << FDCAN_TXBH0_EXTID_Pos)
 #define FDCAN_TXBH0_EXTID        	FDCAN_TXBH0_EXTID_Msk
 #define FDCAN_TXBH0_STDID_Pos 		(18UL)
-#define FDCAN_TXBH0_STDID_Msk  		(0x7FFUL << FDCAN_TXBH0_STDID_Pos) 
+#define FDCAN_TXBH0_STDID_Msk  		(0x7FFUL << FDCAN_TXBH0_STDID_Pos)
 #define FDCAN_TXBH0_STDID          	FDCAN_TXBH0_STDID_Msk
 #define FDCAN_TXBH0_RTR_Pos 		(29UL)
-#define FDCAN_TXBH0_RTR_Msk   		(0x1UL << FDCAN_TXBH0_RTR_Pos) 
+#define FDCAN_TXBH0_RTR_Msk   		(0x1UL << FDCAN_TXBH0_RTR_Pos)
 #define FDCAN_TXBH0_RTR        		FDCAN_TXBH0_RTR_Msk
 #define FDCAN_TXBH1_XTD_Pos 		(30UL)
-#define FDCAN_TXBH1_XTD_Msk  		(0x1UL << FDCAN_TXBH0_EXT_Pos) 
+#define FDCAN_TXBH1_XTD_Msk  		(0x1UL << FDCAN_TXBH0_EXT_Pos)
 #define FDCAN_TXBH1_XTD          	FDCAN_TXBH1_EXT_Msk
 #define FDCAN_TXBH1_ESI_Pos 		(31UL)
-#define FDCAN_TXBH1_ESI_Msk  		(0x1UL << FDCAN_TXBH0_ESI_Pos) 
+#define FDCAN_TXBH1_ESI_Msk  		(0x1UL << FDCAN_TXBH0_ESI_Pos)
 #define FDCAN_TXBH1_ESI          	FDCAN_TXBH1_ESI_Msk
 
 /* HEADER 1 DEFINITIONS */
@@ -79,19 +79,19 @@ typedef struct {
 
 /* HEADER 0 DEFINITIONS */
 #define FDCAN_RXBH0_EXTID_Pos 		(0UL)
-#define FDCAN_RXBH0_EXTID_Msk   	(0x0FFFFFFFUL << FDCAN_RXBH0_EXTID_Pos) 
+#define FDCAN_RXBH0_EXTID_Msk   	(0x0FFFFFFFUL << FDCAN_RXBH0_EXTID_Pos)
 #define FDCAN_RXBH0_EXTID        	FDCAN_RXBH0_EXTID_Msk
 #define FDCAN_RXBH0_STDID_Pos 		(18UL)
-#define FDCAN_RXBH0_STDID_Msk  		(0x7FFUL << FDCAN_RXBH0_STDID_Pos) 
+#define FDCAN_RXBH0_STDID_Msk  		(0x7FFUL << FDCAN_RXBH0_STDID_Pos)
 #define FDCAN_RXBH0_STDID          	FDCAN_RXBH0_STDID_Msk
 #define FDCAN_RXBH0_RTR_Pos 		(29UL)
-#define FDCAN_RXBH0_RTR_Msk   		(0x1UL << FDCAN_RXBH0_RTR_Pos) 
+#define FDCAN_RXBH0_RTR_Msk   		(0x1UL << FDCAN_RXBH0_RTR_Pos)
 #define FDCAN_RXBH0_RTR        		FDCAN_RXBH0_RTR_Msk
 #define FDCAN_RXBH0_XTD_Pos 		(30UL)
-#define FDCAN_RXBH0_XTD_Msk  		(0x1UL << FDCAN_RXBH0_XTD_Pos) 
+#define FDCAN_RXBH0_XTD_Msk  		(0x1UL << FDCAN_RXBH0_XTD_Pos)
 #define FDCAN_RXBH0_XTD          	FDCAN_RXBH0_XTD_Msk
 #define FDCAN_RXBH0_ESI_Pos 		(31UL)
-#define FDCAN_RXBH0_ESI_Msk  		(0x1UL << FDCAN_RXBH0_ESI_Pos) 
+#define FDCAN_RXBH0_ESI_Msk  		(0x1UL << FDCAN_RXBH0_ESI_Pos)
 #define FDCAN_RXBH0_ESI          	FDCAN_RXBH0_ESI_Msk
 
 /* HEADER 1 DEFINITIONS */
