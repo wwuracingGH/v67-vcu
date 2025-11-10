@@ -161,18 +161,20 @@ ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds) {
     mult.APPS3_mult = 65536L / ((int32_t)bounds->APPS3_h - bounds->APPS3_l);
     mult.APPS4_mult = 65536L / ((int32_t)bounds->APPS4_h - bounds->APPS4_l);
 
+    mult.BPS_f_bias = (bounds->BPS_f_hard * 65536) / (bounds->BPS_f_hard + bounds->BPS_r_hard);
+    mult.BPS_scale = 25500L / (bounds->BPS_f_hard + bounds->BPS_r_hard);
     mult.BPS_f_min = bounds->BPS_f_min;
     mult.BPS_r_min = bounds->BPS_r_min;
 
     return mult;
 }
 
-TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound) {
+ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound) {
     GPIOA->ODR &= ~(1 << 6);
     ADC_Block_t vals = CTRL_condense();
     GPIOA->ODR |= 1 << 6;
 
-    TorqueReq_t torque_request = {0, 0};
+    ControlReq_t control_request = { 0, 0, 0, 0 };
 
     int braking_pressure = 0;
     int bse_data_err = (vals.FBPS < mult->BPS_f_min) << 1 | (vals.RBPS < mult->BPS_r_min);
@@ -182,9 +184,9 @@ TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16
     case 1:
         braking_pressure = vals.FBPS; break;
     case 0:
-        braking_pressure = (vals.RBPS + vals.FBPS) >> 1; break;
+        braking_pressure = (vals.RBPS + vals.FBPS) * mult->BPS_scale; break;
     default:
-        torque_request.flags |= APPS_FAULT_BSE; break;
+        control_request.flags |= APPS_FAULT_BSE; break;
     }
 
     int32_t apps[4];
@@ -193,9 +195,15 @@ TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16
     apps[2] = ((int32_t)vals.APPS3 - (int32_t)mult->APPS3_strt) * mult->APPS3_mult;
     apps[3] = ((int32_t)vals.APPS4 - (int32_t)mult->APPS4_strt) * mult->APPS4_mult;
 
+
     GPIOA->ODR &= ~(1 << 6);
     sort_dat_4(apps);
     GPIOA->ODR |= (1 << 6);
+
+    if (abs(apps[1] - apps[2]) > APPS_MAX_DELTA) {
+        if (abs(apps[0] - apps[1]) < APPS_MAX_DELTA && abs(apps[2] - apps[3]) < APPS_MAX_DELTA)
+            control_request.flags |= APPS_FAULT_DELTA;
+    }
 
     int mindex = 3;
     int maxdex = 1;
@@ -211,7 +219,7 @@ TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16
     }
 
     if (mindex >= maxdex) {
-        torque_request.flags |= APPS_FAULT_BOUNDS;
+        control_request.flags |= APPS_FAULT_BOUNDS;
     }
 
     int avg = find_avg_4(apps, mindex, maxdex);
@@ -222,25 +230,24 @@ TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16
         } else {
             mindex++;
         }
-        avg = find_avg_4(apps, mindex, maxdex);
     }
 
     if (mindex == maxdex) {
-        torque_request.flags |= APPS_FAULT_DELTA;
+        control_request.flags |= APPS_FAULT_DELTA;
     }
 
     if (avg < 0) avg = 0;
     if (avg > 65536) avg = 65536;
 
     if (avg > APPS_BPS_PLAUS && braking_pressure > params->brake_threashold) {
-        torque_request.flags |= APPS_FAULT_PLAUS;
+        control_request.flags |= APPS_FAULT_PLAUS;
     }
 
-    torque_request.torque = (avg * params->max_torque) >> 16;
-    if (torque_request.torque > bound) {
-        torque_request.torque = bound;
+    control_request.torque = (avg * params->max_torque) >> 16;
+    if (control_request.torque > bound) {
+        control_request.torque = bound;
     }
 
-    return torque_request;
+    return control_request;
 }
 

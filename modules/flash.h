@@ -6,6 +6,7 @@ typedef struct {
     uint32_t stored_len;
     ADC_Bounds_t adc_bounds;
     ControlParams_t params;
+    VehicleDynamicParams_t vdp;
 } CarParameters_t;
 
 static const volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
@@ -15,7 +16,10 @@ static const volatile CarParameters_t stored_values __attribute__((section(".con
         },
         {
             0
-        }
+        },
+        {
+            0
+        },
 };
 
 /* 

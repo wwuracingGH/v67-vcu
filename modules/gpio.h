@@ -34,12 +34,10 @@
 #endif
 #include "stm32h5xx.h"
 
-#define INPUT_BUTTONID_RTD 0
-#define INPUT_BUTTON_NUM   1
-
-/* Maybe we could add a second button? */
-#define _BUTTON_PORTS { GPIOH }
-#define _BUTTON_PINS { 0 }
+extern GPIO_TypeDef *   buttonPorts[];
+extern uint8_t          buttonPins[];
+extern uint8_t          buttonAcLow[];
+extern const uint8_t    buttonNum;
 
 /* init gpio ports and rtd LED */
 void GPIO_init();

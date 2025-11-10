@@ -62,6 +62,8 @@ typedef struct {
     uint16_t APPS4_h;
     uint16_t BPS_f_min;
     uint16_t BPS_r_min;
+    uint16_t BPS_f_hard; /* what value corresponds to 100bar combined */
+    uint16_t BPS_r_hard; /* what value corresponds to 100bar combined */
 } ADC_Bounds_t;
 
 typedef struct {
@@ -75,19 +77,23 @@ typedef struct {
     int32_t APPS4_mult;
     uint16_t BPS_f_min;
     uint16_t BPS_r_min;
+    uint16_t BPS_f_bias; /* front brake / total braking pressure in p15 format */
+    uint16_t BPS_scale;  /* scale function to put in p8 format */
 } ADC_Mult_t;
 
 typedef struct {
     uint16_t max_torque;
     uint16_t _reserved;
     uint16_t _reserved2;
-    uint16_t brake_threashold;
+    uint16_t hard_braking;
 } ControlParams_t;
 
 typedef struct {
     uint16_t flags;
-    uint16_t torque;
-} TorqueReq_t;
+    uint16_t torque;            /* decimal torque */
+    uint16_t brake_pressure;    /* decimal pressure */
+    uint16_t steer_angle;       /* possibly unused */
+} ControlReq_t;
 
 /* TODO */
 typedef struct {
@@ -114,12 +120,12 @@ ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds);
 ADC_Block_t CTRL_condense();
 
 /* 
- * Returns a torque request struct containing the fault flags and calculated torque request
- * The torque request is non-zero if there's a fault, so be sure to check
- * 
- * Takes in the multipliers for apps calculation and the parameters for torque calculation,
- * as well as an upper bound on torque
+ * Returns the control vector for the car, including:
+ * fault flags
+ * torque in NM
+ * total brake pressure
+ * steering angle (maybe)
  */
-TorqueReq_t CTRL_torqueRequest(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound);
+ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound);
 
 #endif

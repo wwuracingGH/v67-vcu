@@ -135,34 +135,39 @@ uint32_t* _get_data(FDCAN_Rx_FIFO_Element_Typedef* msg) {
 }
 
 void CAN_recieveMessages(void (*callback)(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data)) {
-    while (FDCAN1->RXF0S & FDCAN_RXF0S_F0FL_Msk) {
-        int j = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo0 + j;
+    uint32_t fifo_get_idx, fifo_end;
+    
+    fifo_get_idx = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+    fifo_end = fifo_get_idx + (FDCAN1->RXF0S & FDCAN_RXF0S_F0FL_Msk);
+    for (int j = fifo_get_idx; j < fifo_end; j++) {
+        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo0 + (j % 3);
         callback(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
-        FDCAN1->RXF0A |= j;
-        __DSB();
     }
-    while (FDCAN1->RXF1S & FDCAN_RXF1S_F1FL_Msk) {
-        int j = (FDCAN1->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo1 + j;
+    if(fifo_get_idx != fifo_end) FDCAN1->RXF0A |= (fifo_end - 1) % 3;
+    
+    fifo_get_idx = (FDCAN1->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+    fifo_end = fifo_get_idx + (FDCAN1->RXF1S & FDCAN_RXF1S_F1FL_Msk);
+    for (int j = fifo_get_idx; j < fifo_end; j++) {
+        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo1 + (j % 3);
         callback(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
-        FDCAN1->RXF1A |= j;
-        __DSB();
     }
-    while (FDCAN2->RXF0S & FDCAN_RXF0S_F0FL_Msk) {
-        int j = (FDCAN2->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo0 + j;
+    if(fifo_get_idx != fifo_end) FDCAN1->RXF1A |= (fifo_end - 1) % 3;
+
+    fifo_get_idx = (FDCAN2->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+    fifo_end = fifo_get_idx + (FDCAN2->RXF0S & FDCAN_RXF0S_F0FL_Msk);
+    for (int j = fifo_get_idx; j < fifo_end; j++) {
+        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo0 + (j % 3);
         callback(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
-        FDCAN2->RXF0A |= j;
-        __DSB();
     }
-    while (FDCAN2->RXF1S & FDCAN_RXF1S_F1FL_Msk) {
-        int j = (FDCAN2->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo1 + j;
+    if(fifo_get_idx != fifo_end) FDCAN2->RXF0A |= (fifo_end - 1) % 3;
+
+    fifo_get_idx = (FDCAN2->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+    fifo_end = fifo_get_idx + (FDCAN2->RXF1S & FDCAN_RXF1S_F1FL_Msk);
+    for (int j = fifo_get_idx; j < fifo_end; j++) {
+        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo1 + (j % 3);
         callback(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
-        FDCAN2->RXF1A |= j;
-        __DSB();
     }
+    if(fifo_get_idx != fifo_end) FDCAN2->RXF1A |= (fifo_end - 1) % 3;
 }
 
 int CAN_bytesFromDLC(int dlc) {

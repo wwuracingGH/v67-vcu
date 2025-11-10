@@ -4,9 +4,6 @@
 #include "gpio.h"
 #include "stm32h5xx.h"
 
-GPIO_TypeDef * buttonPorts[] = _BUTTON_PORTS;
-uint32_t buttonPins[] = _BUTTON_PINS;
-
 enum Pin_Mode {
     MODE_INPUT   = 0,
     MODE_OUTPUT  = 1,
@@ -27,10 +24,7 @@ uint8_t buttonPressedMask  = 0;
 uint8_t buttonReleasedMask = 0;
 uint8_t buttonConsumedMask = 0; /* possibly remove? */
 
-#if (INPUT_BUTTON_NUM > 8)
-#error INPUT DRIVER ERROR: MAX BUTTONS SUPPORTED IS 8
-#endif
-uint32_t buttonStartPressedTime[INPUT_BUTTON_NUM];
+uint32_t buttonStartPressedTime[8];
 
 void GPIO_init() {
     RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN; /* turn on gpio clocks */
@@ -82,16 +76,21 @@ void GPIO_init() {
 void GPIO_Update(uint32_t timestamp) {
     buttonPressedMask = 0;
     buttonReleasedMask = 0;
-    for (int i = 0; i < INPUT_BUTTON_NUM; i++) {
+    for (int i = 0; i < buttonNum; i++) {
         int pressed = (buttonPorts[i]->IDR & 1UL << buttonPins[i]);
-        if (!buttonRawInputMask && pressed) {
+        int last_mask = (buttonRawInputMask >> i) & 0x1;
+
+        if (buttonAcLow[i]) pressed = !pressed;
+        if (!last_mask && pressed) {
             buttonPressedMask  |= 1 << i;
+            buttonConsumedMask &= ~(1 << i);
             buttonRawInputMask |= 1 << i;
             buttonStartPressedTime[i] = timestamp;
-        } else if (buttonRawInputMask && !pressed) {
+        } else if (last_mask && !pressed) {
             buttonRawInputMask &= ~(1 << i);
-            buttonConsumedMask &= ~(1 << i);
             buttonReleasedMask |= 1 << i;
+        } else if (!pressed) {
+        	buttonConsumedMask &= ~(1 << i);
         }
     }
 }
@@ -108,8 +107,8 @@ int GPIO_buttonReleased(int button_id) {
 
 /* returns the last held time, or -1 if it isn't being held */
 int GPIO_buttonHeldTime(int button_id, uint32_t timestamp) {
-    if ((buttonConsumedMask | ~buttonRawInputMask) & (1 << button_id)) return -1;
-    return buttonStartPressedTime[button_id] - timestamp;
+    if (buttonConsumedMask & (1 << button_id) || !(buttonRawInputMask & (1 << button_id))) return -1;
+    return timestamp - buttonStartPressedTime[button_id];
 }
 
 /* pretend the button has already been released */

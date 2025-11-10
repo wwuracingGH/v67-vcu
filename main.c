@@ -3,7 +3,15 @@
  * Viking 67 main logic
  *  
  * State machine logic:
- * TODO 
+ * There are 4 main states:
+ * Idle
+ * Ready to drive
+ * MC-init
+ * MC-reset
+ * 
+ * Idle is the state the VCU defaults to upon reset
+ * Ready to Drive is the state where the motor controller is energized and initialized
+ * 
  */
 
 #include <stdint.h>
@@ -19,6 +27,14 @@
 #include "vendor/printf/printf.h"
 #include "canDefinitions.h"
 _RTOS_IMPLEMENTATION_
+
+#define INPUT_BUTTONID_RTD 0
+
+
+GPIO_TypeDef *  buttonPorts[] = { GPIOH };
+uint8_t         buttonPins[]  = {     0 };
+uint8_t         buttonAcLow[] = {     1 };
+const uint8_t   buttonNum     = 1;
 
 /*
  * WHICH PERIPHERALS ARE WHAT & CLOCK SPEED
@@ -40,14 +56,15 @@ _RTOS_IMPLEMENTATION_
 #define TRACTION_CONTROL            0 /* does nothing rn */
 #define REGENBRAKING_ENABLED        0 /* does nothing rn */
 #define MC_WATCHDOG_ENABLED         1 /* drops out of ready to drive upon a fault */
-#define MC_ON_BABYSITTING           0 /* enables reset loop */
-#define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds */
+#define MC_ON_BABYSITTING           1 /* enables waiting for motor controller to get enabled */
+#define MC_RESET_LOOP               0 /* enables reset loop */
+#define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds - bad idea on test harness */
 #define IGNORE_BRAKES               1 /* ignores brakes when checking for rtd and plaus */
 
 /*
  * EXTRA BEHAVIOR CONFIG
  */
-#define CAN_WATCHDOG_TIME        2000 /* 2000 ms before reset */
+#define CAN_WATCHDOG_TIME        5000 /* 5000 ms before reset */
 
 
 /*
@@ -70,7 +87,10 @@ struct {
     int state_mcinit;
     int state_rtd;
     int state_reset;
-    volatile uint16_t fault_counter;
+    volatile uint32_t fault_counter;
+
+    uint16_t plausibility_latch;
+    uint16_t last_valid_tr;
 
     ADC_Block_t         adc_dat;
     MC_HighSpeed        mc_hsmsg;
@@ -127,13 +147,16 @@ const int mc_command_period     =   5;
 const int process_can_period    =  10;
 const int diagnostics_period    = 250;
 const int input_period          =  50;
-const int init_mccheck_period   =  20;
+const int mc_watchdog_period    = 999;
 
-ADC_Bounds_t current_bounds = { 1925, 2670, 2062, 1277, 1683, 2470, 2271, 1477, 500, 3500 };
+ADC_Bounds_t current_bounds = { 1925, 2670, 2062, 1277, 2315, 3135, 1643, 835, 500, 3500 };
 ControlParams_t ctrl_params = { 1000, 0, 0, 100};
 ADC_Mult_t apps_mult = { 0 };
 
-MC_Command command_msg = {0, 0, 1, 0, 0, 0, 0, 0};
+MC_Command command_msg                  = {   0, 0, 1, 0, 0, 0, 0, 0};
+MC_ParameterCommand reset_msg           = {  20, 1, 0, 0, 0};
+MC_ParameterCommand enable_fastm_msg    = { 227, 1, 0, 0xFFFE, 0}; /* TODO: verify */
+MC_ParameterCommand shutup_msg          = { 148, 1, 0, 0b0001110011100111, 0xFFFF};
 
 int main(void) {
     clock_init();
@@ -147,6 +170,9 @@ int main(void) {
 
     LOGLN("STARTING STM");
 
+    car_state.plausibility_latch = 0;
+    car_state.last_valid_tr = 0;
+
     car_state.state_idle   = RTOS_addState(Idle_start, NULL);
     car_state.state_mcinit = RTOS_addState(MCInit_start, NULL);
     car_state.state_rtd    = RTOS_addState(RTD_start, NULL);
@@ -154,6 +180,7 @@ int main(void) {
 
     RTOS_scheduleTask(RTOS_ALL_STATES, Shared_processCAN, process_can_period);
     RTOS_scheduleTask(RTOS_ALL_STATES, Shared_diagnostics, diagnostics_period);
+    RTOS_scheduleTask(RTOS_ALL_STATES, Shared_CANWatchdog, mc_watchdog_period);
 
     RTOS_scheduleTask(car_state.state_rtd, MC_sendCommand, mc_command_period);
 
@@ -195,15 +222,25 @@ void RTD_input() {
     if (GPIO_buttonReleased(INPUT_BUTTONID_RTD)) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD); /* action has been processed */
 
-        /* do unspeakable evil here */
+        GPIO_setLED(0x0000FFFF);
     } else if (GPIO_buttonHeldTime(INPUT_BUTTONID_RTD, RTOS_getMainTick()) > 1000) {
-        GPIO_buttonConsume(INPUT_BUTTONID_RTD); /* action has been processed */
-        RTOS_switchState(car_state.state_idle);
+    	GPIO_buttonConsume(INPUT_BUTTONID_RTD); /* action has been processed */
+    	RTOS_switchState(car_state.state_idle);
     }
 }
 
 void MC_sendCommand() {
     CAN_sendmessage(CTRL_CAN, MC_CANID_COMMAND, 8, (uint8_t*)&command_msg);
+}
+
+void MC_watchdog() {
+    if(!MC_WATCHDOG_ENABLED) return;
+    
+    if (MC_faultedR() && MC_RESET_LOOP)
+        RTOS_switchState(car_state.state_reset);
+    else if (MC_faulted()){
+        RTOS_switchState(car_state.state_idle);
+    }
 }
 
 /* ======= Idle Specific Functionality ======== */
@@ -214,6 +251,8 @@ void Idle_start() {
 }
 
 void Idle_input() {
+	GPIO_Update(RTOS_getMainTick());
+
     if (MC_faulted()) {
         GPIO_setLED(LED_COLOR_FAULT);
     } else {
@@ -222,7 +261,7 @@ void Idle_input() {
 
     int braking = IGNORE_BRAKES || (car_state.adc_dat.FBPS > apps_mult.BPS_f_min);
 
-    if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD)) {
+    if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD) && car_state.last_valid_tr < 10) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD);
 
         RTOS_switchState(car_state.state_mcinit);
@@ -235,7 +274,12 @@ void Reset_start() {
 }
 
 void Reset_input() {
-    if (!MC_faultedR() || MC_faulted()) {
+	GPIO_Update(RTOS_getMainTick());
+
+    if (!MC_RESET_LOOP) 
+        RTOS_switchState(car_state.state_idle);
+
+    if (!MC_faultedR() && MC_faulted()) {
         RTOS_switchState(car_state.state_idle);
     }
 
@@ -247,6 +291,10 @@ void Reset_input() {
     }
 }
 
+void MC_Reset(){
+    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg);
+}
+
 /* ======= MC Init Specific Functionality ======= */
 void MCInit_start() {
     GPIO_setLED(LED_COLOR_WAITING);
@@ -256,15 +304,15 @@ void MCInit_start() {
 
 void MCInit_loop() {
     if (car_state.mc_istates.vsmState == 7)
-        RTOS_switchState(MC_WATCHDOG_ENABLED ? car_state.state_reset : car_state.state_idle);
-    if (car_state.mc_istates.vsmState == 6)
+        RTOS_switchState(MC_RESET_LOOP ? car_state.state_reset : car_state.state_idle);
+    if (car_state.mc_istates.vsmState == 6 || !MC_ON_BABYSITTING)
         RTOS_switchState(car_state.state_rtd);
 }
 
 /* ====== Shared functionality ====== */
 void Shared_diagnostics() {
     CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_RAW, 8, (uint8_t*)&car_state.adc_dat);
-    LOG("Statenum: %d\n", rtos_scheduler.state);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_CALC, 4, (uint8_t*)&car_state.plausibility_latch);
 }
 
 void Shared_processCAN() {
@@ -287,33 +335,31 @@ void Shared_control() {
     car_state.adc_dat = bl;
     LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
-    static int plausibility_latch = 0;
-    static uint16_t last_valid_tr = 0;
-    TorqueReq_t tr = CTRL_torqueRequest(&apps_mult, &ctrl_params, ctrl_params.max_torque);
+    ControlReq_t tr = CTRL_getCommand(&apps_mult, &ctrl_params, ctrl_params.max_torque);
 
     /* the silly */
     if (IGNORE_BRAKES) tr.flags &= ~APPS_FAULT_PLAUS;
 
     if ((tr.flags & APPS_FAULT_PLAUS)) {
-        plausibility_latch = 1;
-    } else if (plausibility_latch) {
+        car_state.plausibility_latch = 1;
+    } else if (car_state.plausibility_latch) {
         if (tr.torque < (ctrl_params.max_torque / 10)) {
-            plausibility_latch = 0;
+            car_state.plausibility_latch = 0;
         }
     }
 
-    if (!((tr.flags & 0xFF00) || plausibility_latch)) {
+    if (!((tr.flags & 0xFF00) || car_state.plausibility_latch)) {
         car_state.fault_counter = 0;
-        last_valid_tr = tr.torque;
+        car_state.last_valid_tr = tr.torque;
         command_msg.torqueCommand = tr.torque;
     } else {
         car_state.fault_counter += control_period;
 
         if (car_state.fault_counter < 20) {
-            command_msg.torqueCommand = last_valid_tr;
+            command_msg.torqueCommand = car_state.last_valid_tr;
         } else if (car_state.fault_counter < 80) {
             int j = 1092 * (80 - car_state.fault_counter); /* p15 fixed point (1092 ~= 2^16 / 60) */
-            command_msg.torqueCommand = (j * last_valid_tr) >> 16UL;
+            command_msg.torqueCommand = (j * car_state.last_valid_tr) >> 16UL;
         } else {
             command_msg.torqueCommand = 0;
         }
@@ -372,7 +418,7 @@ void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t l){
     uint32_t * s = src;
     
     while (l > 0){
-        d = s;
+        *d = *s;
         d++;
         s++;
         l--;

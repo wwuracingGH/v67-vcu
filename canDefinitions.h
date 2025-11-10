@@ -30,6 +30,7 @@ typedef int16_t     MC_Int;
 typedef uint16_t    MC_UnsignedInt;
 typedef uint8_t     MC_Byte;
 
+#define VCU_CANID_APPS_CALC                0x000
 #define VCU_CANID_APPS_RAW                 0x001
 #define VCU_CANID_CALIBRATION              0x002
 #define VCU_CANID_WHEELSPEED               0x003
