@@ -9,6 +9,10 @@
  * Based on STM32 Without CubeIDE's startup.c
  */
 #include <stdint.h>
+#ifndef STM32H533xx
+#define STM32H533xx
+#endif
+#include "vendor/CMSIS/Device/ST/STM32H5/Include/stm32h533xx.h"
 
 #define SRAM_START (0x20000000U)
 #define SRAM_SIZE (272UL * 1024UL)
@@ -153,7 +157,7 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
     0,                                  /* 0x24 */
     0,                                  /* 0x28 */
     (uint32_t)&svcall_handler,          /* 0x2C */
-    (uint32_t)&dbg_monitor_handler,   /* 0x30 */
+    (uint32_t)&dbg_monitor_handler,     /* 0x30 */
     0,                                  /* 0x34 */
     (uint32_t)&pendsv_handler,          /* 0x38 */
     (uint32_t)&systick_handler,         /* 0x3C */

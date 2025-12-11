@@ -16,7 +16,7 @@ OBJS = 	startup.o \
 
 all: $(BINARY)
 
-$(BINARY): main.o startup.o gpio.o can.o logging.o printf.o control.o system_stm32h5xx.o
+$(BINARY): main.o startup.o gpio.o can.o flash.o logging.o printf.o control.o system_stm32h5xx.o
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) $^ -o $(BINARY) -lgcc
 
 startup.o: startup.c
@@ -34,7 +34,7 @@ gpio.o: modules/gpio.c
 can.o: modules/can.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/can.c -c
 
-flash.o: modules/can.c
+flash.o: modules/flash.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) modules/flash.c -c
 
 printf.o: vendor/printf/printf.c

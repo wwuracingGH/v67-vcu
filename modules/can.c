@@ -96,11 +96,8 @@ void CAN_reset() {
 
 void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, uint8_t* data) {
     /* wait while buffer is full, if it doesn't become unfull, return */
-    int timeout = 1024;
+    int timeout = 1600000;
     while ((FDCAN->TXFQS & FDCAN_TXFQS_TFQF_Msk) && timeout) timeout--;
-    /* Maybe reenable? 
-     * if(!timeout) return; 
-     */
 
     /* first open buffer slot */
     int j = (FDCAN->TXFQS & FDCAN_TXFQS_TFQPI_Msk) >> FDCAN_TXFQS_TFQPI_Pos;

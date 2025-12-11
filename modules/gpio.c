@@ -26,6 +26,26 @@ uint8_t buttonConsumedMask = 0; /* possibly remove? */
 
 uint32_t buttonStartPressedTime[8];
 
+/* internal init function */
+void _init_timer() {
+    RCC->APB1LENR |= RCC_APB1LENR_TIM3EN;
+    
+
+    TIM3->CCR2 = 2000;
+    TIM3->CCR3 = 2000;
+    TIM3->CCR4 = 2000;
+
+    /* enables pwm mode for channels */
+    TIM3->CCMR1 |= (0b0110 << TIM_CCMR1_OC2M_Pos);
+    TIM3->CCMR2 |= (0b0110 << TIM_CCMR2_OC3M_Pos) | (0b0110 << TIM_CCMR2_OC4M_Pos);
+    TIM3->CCER |= TIM_CCER_CC2E | TIM_CCER_CC3E | TIM_CCER_CC4E;
+    TIM3->PSC = 4;     /* divides by 4 to get 62.5 mhz */
+    TIM3->ARR = 65535; /* reloads 2^16 to get ~1khz of led swiching */
+    TIM3->CR1 |= TIM_CR1_UDIS | TIM_CR1_URS;
+    TIM3->CR1 |= TIM_CR1_CEN; /* enable the timer */
+
+}
+
 void GPIO_init() {
     RCC->AHB2ENR |= RCC_AHB2ENR_GPIOAEN; /* turn on gpio clocks */
     RCC->AHB2ENR |= RCC_AHB2ENR_GPIOBEN;
@@ -39,6 +59,7 @@ void GPIO_init() {
                  |  (MODE_ANALOG    << GPIO_MODER_MODE4_Pos)   /* RBPS          */
                  |  (MODE_ANALOG    << GPIO_MODER_MODE5_Pos)   /* FBPS          */
                  |  (MODE_OUTPUT    << GPIO_MODER_MODE6_Pos)   /* TIMING PIN    */
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODE7_Pos)   /* STATUS LED R  */
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE9_Pos)   /* UART TX       */
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE10_Pos)  /* UART RX       */
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE11_Pos)  /* CAN1 TX       */
@@ -49,27 +70,30 @@ void GPIO_init() {
 
     GPIOA->PUPDR  = 0;
     GPIOA->OSPEEDR |= (3UL << GPIO_OSPEEDR_OSPEED6_Pos); /* Timing pin should be high speed */
+    GPIOA->AFR[0] |= (2UL << GPIO_AFRL_AFSEL7_Pos);  /* TIM3 CH2 */
     GPIOA->AFR[1] |= (7UL << GPIO_AFRH_AFSEL9_Pos) | /* USART TX */
                     (7UL << GPIO_AFRH_AFSEL10_Pos) | /* USART RX */
                     (9UL << GPIO_AFRH_AFSEL11_Pos) | /* CAN1 TX  */
                     (9UL << GPIO_AFRH_AFSEL12_Pos);  /* CAN1 RX  */
 
-    GPIOB->MODER &= (0xFFFFUL << 0x10UL);
-    GPIOB->MODER |= (MODE_ALTFUNC   << GPIO_MODER_MODE5_Pos)   /* CAN2 TX       */
+    GPIOB->MODER &= ~0xFFFFFFUL;
+    GPIOB->MODER |= (MODE_ALTFUNC   << GPIO_MODER_MODE0_Pos)   /* STATUS LED G  */
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODE1_Pos)   /* STATUS LED B  */
+                 |  (MODE_ALTFUNC   << GPIO_MODER_MODE5_Pos)   /* CAN2 TX       */
                  |  (MODE_ALTFUNC   << GPIO_MODER_MODE6_Pos)   /* CAN2 RX       */
                  |  (MODE_OUTPUT    << GPIO_MODER_MODE10_Pos); /* BUZZER        */
 
-    GPIOB->AFR[0] |= (9 << GPIO_AFRL_AFSEL5_Pos) | /* CAN2 TX */
-                     (9 << GPIO_AFRL_AFSEL6_Pos);  /* CAN2 RX */
+    GPIOB->AFR[0] |= (2UL << GPIO_AFRL_AFSEL0_Pos) | /* TIM3 CH3 */
+                     (2UL << GPIO_AFRL_AFSEL1_Pos) | /* TIM3 CH4 */
+                     (9UL << GPIO_AFRL_AFSEL5_Pos) | /* CAN2 TX */
+                     (9UL << GPIO_AFRL_AFSEL6_Pos);  /* CAN2 RX */
 
     GPIOB->PUPDR  = 0;
 
-    GPIOC->MODER = ~((MODE_ALTFUNC    << GPIO_MODER_MODE13_Pos) | /* STATUS LED R */
-                      (MODE_ALTFUNC    << GPIO_MODER_MODE14_Pos) | /* STATUS LED G */
-                      (MODE_ALTFUNC    << GPIO_MODER_MODE15_Pos)); /* STATUS LED B */
+    GPIOB->MODER &= ~(0b11     << GPIO_MODER_MODE12_Pos);  /* RTD BUTTON    */
+    GPIOB->PUPDR |= (PUPD_PULLUP    << GPIO_PUPDR_PUPD12_Pos);  /* Button is pulled up */
 
-    GPIOH->MODER &= (MODE_INPUT     << GPIO_MODER_MODE0_Pos);  /* RTD BUTTON    */
-    GPIOH->PUPDR |= (PUPD_PULLUP    << GPIO_PUPDR_PUPD0_Pos);  /* Button is pulled up */
+    _init_timer();
 }
 
 /* registers all of the events */
@@ -126,6 +150,7 @@ void GPIO_setLED(uint32_t color) {
     uint32_t blue  = ((color >>  8) & 0xFF) * alpha;
 
     /* TODO: proper timer implementation */
-    GPIOC->ODR &= ~(0b111 << 13);
-    GPIOC->ODR |= ((red > 25500) << 13) | ((green > 25500) << 14) | ((blue > 25500) << 15);
+    TIM3->CCR2 = red;
+    TIM3->CCR3 = green;
+    TIM3->CCR4 = blue;
 }

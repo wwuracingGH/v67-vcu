@@ -30,17 +30,16 @@ typedef int16_t     MC_Int;
 typedef uint16_t    MC_UnsignedInt;
 typedef uint8_t     MC_Byte;
 
-#define VCU_CANID_APPS_CALC                0x000
-#define VCU_CANID_APPS_RAW                 0x001
-#define VCU_CANID_CALIBRATION              0x002
-#define VCU_CANID_WHEELSPEED               0x003
-#define VCU_CANID_ACCEL                    0x004
-#define VCU_CANID_STATE                    0x005
-#define VCU_CANID_REPROGRAMAPPS            0x006
-#define VCU_CANID_REPROGRAMCONTROL         0x007
-#define VCU_CANID_REVEAL_VALS              0x008
-#define VCU_CANID_APPS_VALS                0x009
-#define VCU_CANID_CONTROL_VALS             0x00A
+#define DL_CANID_WHEELSPEED                0x001
+#define DL_CANID_ACCEL                     0x002
+
+#define VCU_CANID_APPS_RAW                 0x101
+#define VCU_CANID_BPS_RAW              	   0x102
+#define VCU_CANID_CTRL_VEC                 0x103
+#define VCU_CANID_VCU_STATE            	   0x104
+#define VCU_CANID_PARAM_REVEAL             0x105
+#define VCU_CANID_PARAM_CHANGE             0x106
+#define VCU_CANID_PARAM_REQUEST            0x107
 
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1
@@ -427,18 +426,41 @@ VCU_CANSTRUCT {
 VCU_CANSTRUCT {
     uint16_t carAccel_X;
     uint16_t carAccel_Y;
+    uint16_t yawRate;
 } DL_CarAcceleration;
 
 VCU_CANSTRUCT {
-    uint16_t new_APPS1_MIN;
-    uint16_t new_APPS1_MAX;
-    uint16_t new_APPS2_MIN;
-    uint16_t new_APPS2_MAX;
-} VCU_ReprogramApps;
+	uint16_t apps1;
+	uint16_t apps2;
+	uint16_t apps3;
+	uint16_t apps4;
+} VCU_AppsRaw;
 
 VCU_CANSTRUCT {
-    uint16_t new_MaxTorqueReq;
-    uint16_t new_MinRegenReq;
-    uint16_t new_MinRegenSpeed;
-    uint16_t new_BrakeThreashold;
-} VCU_ReprogramControl;
+	uint16_t fbps;
+	uint16_t rbps;
+} VCU_BpsRaw;
+
+VCU_CANSTRUCT {
+	uint8_t state;
+	uint8_t faultCounter    : 7;
+    uint8_t pLatch          : 1;
+    uint16_t lastValidTorqueReq;
+} VCU_VCUState;
+
+VCU_CANSTRUCT {
+	uint32_t setValue;
+	uint16_t id;
+} VCU_ParamReveal;
+
+VCU_CANSTRUCT {
+	uint32_t setValue;
+	uint16_t id : 15;
+	uint16_t write : 1;
+} VCU_ParamSet;
+
+VCU_CANSTRUCT {
+	uint16_t id;
+} VCU_ParamReq;
+
+

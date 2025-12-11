@@ -49,11 +49,11 @@ void CTRL_ADCinit() {
     ADC1->CFGR2 |= (3UL << ADC_CFGR2_OVSR_Pos) | (4UL << ADC_CFGR2_OVSS_Pos) | ADC_CFGR2_ROVSE;
 
     ADC1->OR |= 1;
-    /* set adc1 sequence -> 0 1 14 15 18 19 */
+    /* set adc1 sequence -> 0 1 18 19 14 15 */
     ADC1->SQR1 |= (ADC_CHANNELS - 1) << ADC_SQR1_L_Pos;
-    ADC1->SQR1 |= (0 << ADC_SQR1_SQ1_Pos) | (1 << ADC_SQR1_SQ2_Pos) | (14 << ADC_SQR1_SQ3_Pos) |
+    ADC1->SQR1 |= (0 << ADC_SQR1_SQ1_Pos) | (19 << ADC_SQR1_SQ2_Pos) | (18 << ADC_SQR1_SQ3_Pos) |
                 (15 << ADC_SQR1_SQ4_Pos);
-    ADC1->SQR2 |= (19 << ADC_SQR2_SQ6_Pos) | (18 << ADC_SQR2_SQ5_Pos);
+    ADC1->SQR2 |= (14 << ADC_SQR2_SQ6_Pos) | (1 << ADC_SQR2_SQ5_Pos);
 
     ADC1->CR |= ADC_CR_ADEN;
 
@@ -113,6 +113,7 @@ ADC_Block_t CTRL_condense() {
 }
 
 int find_avg_4(int32_t * vals, int min, int max) {
+	if(max - min == 0) return vals[max];
     int avg = 0;
     for (int i = min; i <= max; i++)
         avg += vals[i];
@@ -149,7 +150,7 @@ void sort_dat_4(int32_t * vals) {
     }
 }
 
-ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds) {
+ADC_Mult_t CTRL_getADCMultiplers(volatile ADC_Bounds_t* bounds) {
     ADC_Mult_t mult = {0};
     mult.APPS1_strt = bounds->APPS1_l;
     mult.APPS2_strt = bounds->APPS2_l;
@@ -161,11 +162,15 @@ ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds) {
     mult.APPS3_mult = 65536L / ((int32_t)bounds->APPS3_h - bounds->APPS3_l);
     mult.APPS4_mult = 65536L / ((int32_t)bounds->APPS4_h - bounds->APPS4_l);
 
-    mult.BPS_f_bias = (bounds->BPS_f_hard * 65536) / (bounds->BPS_f_hard + bounds->BPS_r_hard);
-    mult.BPS_scale = 25500L / (bounds->BPS_f_hard + bounds->BPS_r_hard);
-    mult.BPS_f_min = bounds->BPS_f_min;
-    mult.BPS_r_min = bounds->BPS_r_min;
-
+    /* gets brake pressure as a proportion */
+    volatile uint32_t b = (bounds->BPS_s_max - bounds->BPS_s_min) * 2;
+    volatile uint32_t h = ((uint32_t)bounds->BPS_f_bias * b) >> 16;
+    mult.BPS_f_mult = (65536UL / h);
+    h = ((65535UL - bounds->BPS_f_bias) * b) >> 16;
+    mult.BPS_r_mult = (65536UL / h);
+    h = b;
+    mult.BPS_b_mult = (65536UL / h);
+    mult.BPS_s_min = bounds->BPS_s_min;
     return mult;
 }
 
@@ -176,15 +181,15 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
 
     ControlReq_t control_request = { 0, 0, 0, 0 };
 
-    int braking_pressure = 0;
-    int bse_data_err = (vals.FBPS < mult->BPS_f_min) << 1 | (vals.RBPS < mult->BPS_r_min);
-    switch (bse_data_err) {
+    volatile int braking_pressure = 0;
+    int bps_data_err = (vals.FBPS < (mult->BPS_s_min >> 1)) << 1 | (vals.RBPS < (mult->BPS_s_min >> 1));
+    switch (bps_data_err) {
     case 2:
-        braking_pressure = vals.RBPS; break;
+        braking_pressure = (vals.RBPS - mult->BPS_s_min) * mult->BPS_r_mult; break;
     case 1:
-        braking_pressure = vals.FBPS; break;
+        braking_pressure = (vals.FBPS - mult->BPS_s_min) * mult->BPS_f_mult; break;
     case 0:
-        braking_pressure = (vals.RBPS + vals.FBPS) * mult->BPS_scale; break;
+        braking_pressure = ((vals.RBPS + vals.FBPS) - (2 * mult->BPS_s_min)) * mult->BPS_b_mult; break;
     default:
         control_request.flags |= APPS_FAULT_BSE; break;
     }
@@ -195,18 +200,12 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
     apps[2] = ((int32_t)vals.APPS3 - (int32_t)mult->APPS3_strt) * mult->APPS3_mult;
     apps[3] = ((int32_t)vals.APPS4 - (int32_t)mult->APPS4_strt) * mult->APPS4_mult;
 
-
     GPIOA->ODR &= ~(1 << 6);
     sort_dat_4(apps);
     GPIOA->ODR |= (1 << 6);
 
-    if (abs(apps[1] - apps[2]) > APPS_MAX_DELTA) {
-        if (abs(apps[0] - apps[1]) < APPS_MAX_DELTA && abs(apps[2] - apps[3]) < APPS_MAX_DELTA)
-            control_request.flags |= APPS_FAULT_DELTA;
-    }
-
     int mindex = 3;
-    int maxdex = 1;
+    int maxdex = 0;
 
     for (int i = 0; i < 4; i++) {
         int oob = (apps[i] > (APPS_OUT_OF_BOUNDS + (1 << 16))) || (apps[i] < -(APPS_OUT_OF_BOUNDS));
@@ -218,18 +217,27 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
         }
     }
 
+
+    if(maxdex - mindex == 3) {
+        if (apps[2] - apps[1] > APPS_MAX_DELTA) {
+            if (abs(apps[0] - apps[1]) < APPS_MAX_DELTA && abs(apps[2] - apps[3]) < APPS_MAX_DELTA)
+                control_request.flags |= APPS_FAULT_DISAG;
+        }
+    }
+
     if (mindex >= maxdex) {
         control_request.flags |= APPS_FAULT_BOUNDS;
     }
 
     int avg = find_avg_4(apps, mindex, maxdex);
 
-    while (apps[maxdex] - apps[mindex] > APPS_MAX_DELTA && (maxdex >= mindex)) { /* 10% in */
+    while ((apps[maxdex] - apps[mindex]) > APPS_MAX_DELTA && (maxdex > mindex)) { /* 10% in */
         if (apps[maxdex] + apps[mindex] > avg * 2) {
             maxdex--;
         } else {
             mindex++;
         }
+        avg = find_avg_4(apps, mindex, maxdex);
     }
 
     if (mindex == maxdex) {
@@ -239,7 +247,8 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
     if (avg < 0) avg = 0;
     if (avg > 65536) avg = 65536;
 
-    if (avg > APPS_BPS_PLAUS && braking_pressure > params->brake_threashold) {
+    control_request.brake_pressure = ((uint32_t)braking_pressure * params->max_braking_pres) >> 16;
+    if (avg > APPS_BPS_PLAUS && control_request.brake_pressure > params->hard_braking) {
         control_request.flags |= APPS_FAULT_PLAUS;
     }
 

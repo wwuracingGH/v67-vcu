@@ -22,6 +22,7 @@
 #include "llrttsos.h"
 #include "modules/gpio.h"
 #include "modules/logging.h"
+#include "modules/flash.h"
 #include "modules/control.h"
 #include "modules/can.h"
 #include "vendor/printf/printf.h"
@@ -31,8 +32,8 @@ _RTOS_IMPLEMENTATION_
 #define INPUT_BUTTONID_RTD 0
 
 
-GPIO_TypeDef *  buttonPorts[] = { GPIOH };
-uint8_t         buttonPins[]  = {     0 };
+GPIO_TypeDef *  buttonPorts[] = { GPIOB };
+uint8_t         buttonPins[]  = {    12 };
 uint8_t         buttonAcLow[] = {     1 };
 const uint8_t   buttonNum     = 1;
 
@@ -56,7 +57,7 @@ const uint8_t   buttonNum     = 1;
 #define TRACTION_CONTROL            0 /* does nothing rn */
 #define REGENBRAKING_ENABLED        0 /* does nothing rn */
 #define MC_WATCHDOG_ENABLED         1 /* drops out of ready to drive upon a fault */
-#define MC_ON_BABYSITTING           1 /* enables waiting for motor controller to get enabled */
+#define MC_ON_BABYSITTING           0 /* enables waiting for motor controller to get enabled */
 #define MC_RESET_LOOP               0 /* enables reset loop */
 #define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds - bad idea on test harness */
 #define IGNORE_BRAKES               1 /* ignores brakes when checking for rtd and plaus */
@@ -87,10 +88,14 @@ struct {
     int state_mcinit;
     int state_rtd;
     int state_reset;
-    volatile uint32_t fault_counter;
 
+    volatile uint16_t fault_counter;
     uint16_t plausibility_latch;
     uint16_t last_valid_tr;
+    uint16_t last_torque_bounds;
+    
+    ControlReq_t          last_ctrl_vec;
+    VehicleDynamicState_t last_state_vec;
 
     ADC_Block_t         adc_dat;
     MC_HighSpeed        mc_hsmsg;
@@ -149,11 +154,10 @@ const int diagnostics_period    = 250;
 const int input_period          =  50;
 const int mc_watchdog_period    = 999;
 
-ADC_Bounds_t current_bounds = { 1925, 2670, 2062, 1277, 2315, 3135, 1643, 835, 500, 3500 };
-ControlParams_t ctrl_params = { 1000, 0, 0, 100};
+CarParameters_t* car_params;
 ADC_Mult_t apps_mult = { 0 };
 
-MC_Command command_msg                  = {   0, 0, 1, 0, 0, 0, 0, 0};
+MC_Command          command_msg         = {   0, 0, 1, 0, 0, 0, 0, 0};
 MC_ParameterCommand reset_msg           = {  20, 1, 0, 0, 0};
 MC_ParameterCommand enable_fastm_msg    = { 227, 1, 0, 0xFFFE, 0}; /* TODO: verify */
 MC_ParameterCommand shutup_msg          = { 148, 1, 0, 0b0001110011100111, 0xFFFF};
@@ -199,7 +203,8 @@ int main(void) {
 
     RTOS_switchState(car_state.state_idle);
 
-    apps_mult = CTRL_getADCMultiplers(&current_bounds);
+    car_params = FLASH_getVals();
+    apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
 
     LOG("Hello World!\n");
     LOGLN("CLOCK CHECK: %d", SysTick->LOAD + 1);
@@ -259,7 +264,8 @@ void Idle_input() {
         GPIO_setLED(LED_COLOR_IDLE);
     }
 
-    int braking = IGNORE_BRAKES || (car_state.adc_dat.FBPS > apps_mult.BPS_f_min);
+    /* check that it is in a state of hard braking before getting into rtd */
+    int braking = IGNORE_BRAKES || (car_state.last_ctrl_vec.brake_pressure > car_params->params.hard_braking);
 
     if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD) && car_state.last_valid_tr < 10) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD);
@@ -312,7 +318,11 @@ void MCInit_loop() {
 /* ====== Shared functionality ====== */
 void Shared_diagnostics() {
     CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_RAW, 8, (uint8_t*)&car_state.adc_dat);
-    CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_CALC, 4, (uint8_t*)&car_state.plausibility_latch);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_BPS_RAW, 4, (uint8_t*)&car_state.adc_dat.FBPS);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_CTRL_VEC, 8, (uint8_t*)&car_state.last_ctrl_vec);
+    VCU_VCUState st = { rtos_scheduler.state, car_state.fault_counter, car_state.plausibility_latch, car_state.last_valid_tr };
+
+    CAN_sendmessage(DATA_CAN, VCU_CANID_VCU_STATE, 8, (uint8_t*)&st);
 }
 
 void Shared_processCAN() {
@@ -331,19 +341,25 @@ void Shared_CANWatchdog() {
 }
 
 void Shared_control() {
+    const int fault_ignore     = 20;
+    const int fault_cutoff     = 80;
+    const int fault_multiplier = 65536 / (fault_cutoff - fault_ignore);
+
     ADC_Block_t bl = CTRL_condense();
     car_state.adc_dat = bl;
     LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
-    ControlReq_t tr = CTRL_getCommand(&apps_mult, &ctrl_params, ctrl_params.max_torque);
+    int max_torque = car_params->params.max_torque;
+
+    ControlReq_t tr = CTRL_getCommand(&apps_mult, &car_params->params, max_torque);
 
     /* the silly */
-    if (IGNORE_BRAKES) tr.flags &= ~APPS_FAULT_PLAUS;
+    if (IGNORE_BRAKES) tr.flags &= ~(APPS_FAULT_PLAUS | APPS_FAULT_BSE);
 
     if ((tr.flags & APPS_FAULT_PLAUS)) {
         car_state.plausibility_latch = 1;
     } else if (car_state.plausibility_latch) {
-        if (tr.torque < (ctrl_params.max_torque / 10)) {
+        if (tr.torque < (car_params->params.max_torque / 10)) {
             car_state.plausibility_latch = 0;
         }
     }
@@ -353,12 +369,13 @@ void Shared_control() {
         car_state.last_valid_tr = tr.torque;
         command_msg.torqueCommand = tr.torque;
     } else {
-        car_state.fault_counter += control_period;
+    	if (car_state.fault_counter < 100)
+    		car_state.fault_counter += control_period;
 
-        if (car_state.fault_counter < 20) {
+        if (car_state.fault_counter < fault_ignore) {
             command_msg.torqueCommand = car_state.last_valid_tr;
-        } else if (car_state.fault_counter < 80) {
-            int j = 1092 * (80 - car_state.fault_counter); /* p15 fixed point (1092 ~= 2^16 / 60) */
+        } else if (car_state.fault_counter < fault_cutoff) {         
+            int j = fault_multiplier * (fault_cutoff - car_state.fault_counter); /* p15 fixed point (1092 ~= 2^16 / 60) */
             command_msg.torqueCommand = (j * car_state.last_valid_tr) >> 16UL;
         } else {
             command_msg.torqueCommand = 0;
@@ -438,11 +455,11 @@ void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data) {
         memcpy_32((uint32_t*)&car_state.mc_hsmsg, (uint32_t*)data, transfers);
         car_state.mc_hsmsg_timestamp = tick;
         break;
-    case VCU_CANID_ACCEL:
+    case DL_CANID_ACCEL:
         memcpy_32((uint32_t*)&car_state.dl_accel, (uint32_t*)data, transfers);
         car_state.dl_accel_timestamp = tick;
         break;
-    case VCU_CANID_WHEELSPEED:
+    case DL_CANID_WHEELSPEED:
         memcpy_32((uint32_t*)&car_state.dl_wheelspeed, (uint32_t*)data, transfers);
         car_state.dl_wheelspeed_timestamp = tick;
         break;
@@ -459,11 +476,14 @@ void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data) {
         car_state.mc_istates_timestamp = tick;
         break;
     /* TODO: Reprogram/Reveal */
-    case VCU_CANID_REPROGRAMAPPS:
-        break;
-    case VCU_CANID_REPROGRAMCONTROL:
-        break;
-    case VCU_CANID_REVEAL_VALS:
+    case VCU_CANID_PARAM_CHANGE:
+    	VCU_ParamSet* ps = (VCU_ParamSet*)data;
+    	FLASH_storeVal(ps->id, ps->setValue, ps->write);
+    	apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
+    case VCU_CANID_PARAM_REQUEST:
+    	VCU_ParamReq* rq = (VCU_ParamSet*)data;
+    	VCU_ParamReveal rv = { FLASH_getVal(rq->id), rq->id };
+    	CAN_sendmessage(DATA_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
         break;
     default:
         break;

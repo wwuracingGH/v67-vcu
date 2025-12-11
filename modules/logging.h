@@ -2,8 +2,7 @@
  * Nicole Swierstra
  * V67 Logging
  * 
- * Logging functions handled by the DMA mostly to avoid costly 
- * 
+ * Logging functions handled by the DMA mostly to avoid costly copying 
  * 
  */
 

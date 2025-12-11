@@ -30,6 +30,7 @@
 #define APPS_FAULT_DELTA    (1 << 14)
 #define APPS_FAULT_PLAUS    (1 << 13)
 #define APPS_FAULT_BSE      (1 << 12)
+#define APPS_FAULT_DISAG    (1 << 11)
 
 #define APPS_FLAGS_NEG      (1 << 0) /* maybe useful in the future? */
 
@@ -60,10 +61,9 @@ typedef struct {
     uint16_t APPS3_h;
     uint16_t APPS4_l;
     uint16_t APPS4_h;
-    uint16_t BPS_f_min;
-    uint16_t BPS_r_min;
-    uint16_t BPS_f_hard; /* what value corresponds to 100bar combined */
-    uint16_t BPS_r_hard; /* what value corresponds to 100bar combined */
+    uint16_t BPS_s_min;
+    uint16_t BPS_s_max;
+    uint16_t BPS_f_bias;  /* p16 proportion - f_val / (f_val + r_val) - calculated by vcu reprogrammer */
 } ADC_Bounds_t;
 
 typedef struct {
@@ -71,28 +71,28 @@ typedef struct {
     uint16_t APPS2_strt;
     uint16_t APPS3_strt;
     uint16_t APPS4_strt;
-    int32_t APPS1_mult;
-    int32_t APPS2_mult;
-    int32_t APPS3_mult;
-    int32_t APPS4_mult;
-    uint16_t BPS_f_min;
-    uint16_t BPS_r_min;
-    uint16_t BPS_f_bias; /* front brake / total braking pressure in p15 format */
-    uint16_t BPS_scale;  /* scale function to put in p8 format */
+    int32_t  APPS1_mult;
+    int32_t  APPS2_mult;
+    int32_t  APPS3_mult;
+    int32_t  APPS4_mult;
+    uint16_t BPS_b_mult; /* proportion of 300 bar */
+    uint16_t BPS_f_mult; /* mult by 1 / fbias */
+    uint16_t BPS_r_mult; /* rear brake / total braking pressure in p15 format */
+    uint16_t BPS_s_min;  /* sensor minimum */
 } ADC_Mult_t;
 
 typedef struct {
-    uint16_t max_torque;
-    uint16_t _reserved;
+    uint16_t max_torque;        /* maximum torque request   - 10x Nm*/
+    uint16_t hard_braking;      /* total system pressure for hard braking */
+    uint16_t max_braking_pres;  /* maximum braking pressure - 10x bar */
     uint16_t _reserved2;
-    uint16_t hard_braking;
 } ControlParams_t;
 
 typedef struct {
     uint16_t flags;
-    uint16_t torque;            /* decimal torque */
-    uint16_t brake_pressure;    /* decimal pressure */
-    uint16_t steer_angle;       /* possibly unused */
+    uint16_t torque;            /* decimal torque   - 10x Nm */
+    uint16_t brake_pressure;    /* decimal pressure - 10x bar */
+    uint16_t steer_angle;       /* possibly unused  - 10x deg */
 } ControlReq_t;
 
 /* TODO */
@@ -112,7 +112,7 @@ void CTRL_ADCinit();
  * 
  * Takes in the bounds to get the multipliers from 
  */
-ADC_Mult_t CTRL_getADCMultiplers(ADC_Bounds_t* bounds);
+ADC_Mult_t CTRL_getADCMultiplers(volatile ADC_Bounds_t* bounds);
 
 /*
  * Only exposed for debugging, can be hidden if raw apps values aren't necessary
@@ -123,7 +123,7 @@ ADC_Block_t CTRL_condense();
  * Returns the control vector for the car, including:
  * fault flags
  * torque in NM
- * total brake pressure
+ * total brake pressure in bar
  * steering angle (maybe)
  */
 ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t bound);
