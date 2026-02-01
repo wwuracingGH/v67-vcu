@@ -19,8 +19,18 @@
 void CAN_init();
 void CAN_reset();
 
+typedef struct {
+    uint32_t id;
+    uint16_t dlc;
+    uint16_t bus_id;
+    uint32_t data[2];
+} CAN_Message_t;
+
+void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t l);
+
 void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, uint8_t* data);
-void CAN_recieveMessages(void (*callback)(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data));
+int CAN_rxCount();
+CAN_Message_t* CAN_getFirstMsg();
 
 int CAN_bytesFromDLC(int dlc);
 

@@ -73,8 +73,6 @@ void gpdma1_ch7_handler(void) __attribute__((weak, alias("default_handler")));
 void iwdg_handler(void) __attribute__((weak, alias("default_handler")));
 void adc1_handler(void) __attribute__((weak, alias("default_handler")));
 void dac1_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan_it0_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan_it1_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_brk_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_up_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_trg_com_handler(void) __attribute__((weak, alias("default_handler")));
@@ -128,8 +126,6 @@ void fpu_handler(void) __attribute__((weak, alias("default_handler")));
 void icache_handler(void) __attribute__((weak, alias("default_handler")));
 void dcache_handler(void) __attribute__((weak, alias("default_handler")));
 void dcmi_pssi_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan2_it0_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan2_it1_handler(void) __attribute__((weak, alias("default_handler")));
 void dts_handler(void) __attribute__((weak, alias("default_handler")));
 void rng_handler(void) __attribute__((weak, alias("default_handler")));
 void otfdec1_handler(void) __attribute__((weak, alias("default_handler")));
@@ -142,6 +138,11 @@ void i3c1_ev(void) __attribute__((weak, alias("default_handler")));
 void i3c1_er(void) __attribute__((weak, alias("default_handler")));
 void i3c2_ev(void) __attribute__((weak, alias("default_handler")));
 void i3c2_er(void) __attribute__((weak, alias("default_handler")));
+
+extern void fdcan1_it0_handler();
+extern void fdcan1_it1_handler();
+extern void fdcan2_it0_handler();
+extern void fdcan2_it1_handler();
 
 uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector"))) = {
     STACK_POINTER_INIT_ADDRESS,         /* 0x00 */
@@ -201,8 +202,8 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
     0,                                  /* 0xD0 */
     (uint32_t)&adc1_handler,            /* 0xD4 */
     (uint32_t)&dac1_handler,            /* 0xD8 */
-    (uint32_t)&fdcan_it0_handler,       /* 0xDC */
-    (uint32_t)&fdcan_it1_handler,       /* 0xE0 */
+    (uint32_t)&fdcan1_it0_handler,       /* 0xDC */
+    (uint32_t)&fdcan1_it1_handler,       /* 0xE0 */
     (uint32_t)&tim1_brk_handler,        /* 0xE4 */
     (uint32_t)&tim1_up_handler,         /* 0xE8 */
     (uint32_t)&tim1_trg_com_handler,    /* 0xEC */

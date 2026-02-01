@@ -56,7 +56,7 @@ const uint8_t   buttonNum     = 1;
  */
 #define TRACTION_CONTROL            0 /* does nothing rn */
 #define REGENBRAKING_ENABLED        0 /* does nothing rn */
-#define MC_WATCHDOG_ENABLED         1 /* drops out of ready to drive upon a fault */
+#define MC_WATCHDOG_ENABLED         0 /* drops out of ready to drive upon a fault */
 #define MC_ON_BABYSITTING           0 /* enables waiting for motor controller to get enabled */
 #define MC_RESET_LOOP               0 /* enables reset loop */
 #define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds - bad idea on test harness */
@@ -149,7 +149,7 @@ void systick_handler() { RTOS_Update(); }
 
 const int control_period        = 200;
 const int mc_command_period     =   5;
-const int process_can_period    =  10;
+const int process_can_period    =   1;
 const int diagnostics_period    = 250;
 const int input_period          =  50;
 const int mc_watchdog_period    = 999;
@@ -219,6 +219,7 @@ int main(void) {
 void RTD_start() {
     GPIO_setLED(LED_COLOR_RTD);
     BUZZERON();
+    command_msg.inverterEnable = 1;
     RTOS_scheduleEvent(BUZZEROFF, 1500);
 }
 
@@ -322,11 +323,59 @@ void Shared_diagnostics() {
     CAN_sendmessage(DATA_CAN, VCU_CANID_CTRL_VEC, 8, (uint8_t*)&car_state.last_ctrl_vec);
     VCU_VCUState st = { rtos_scheduler.state, car_state.fault_counter, car_state.plausibility_latch, car_state.last_valid_tr };
 
-    CAN_sendmessage(DATA_CAN, VCU_CANID_VCU_STATE, 8, (uint8_t*)&st);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_VCU_STATE, 4, (uint8_t*)&st);
 }
 
 void Shared_processCAN() {
-    CAN_recieveMessages(msgCallback);
+    CAN_Message_t * msg;
+    uint32_t tick = RTOS_getMainTick();
+    while((msg = CAN_getFirstMsg()) != 0) {
+        uint32_t l = msg->dlc;
+        if (msg->bus_id == 0) 
+            car_state.last_can_timestamp1 = tick; 
+        if (msg->bus_id == 1)
+            car_state.last_can_timestamp2 = tick; 
+
+        switch (msg->id) {
+        case MC_CANID_HIGHSPEEDMESSAGE:
+            memcpy_32((uint32_t*)&car_state.mc_hsmsg, msg->data, 2);
+            car_state.mc_hsmsg_timestamp = tick;
+            break;
+        case DL_CANID_ACCEL:
+            memcpy_32((uint32_t*)&car_state.dl_accel, msg->data, 2);
+            car_state.dl_accel_timestamp = tick;
+            break;
+        case DL_CANID_WHEELSPEED:
+            memcpy_32((uint32_t*)&car_state.dl_wheelspeed, msg->data, 2);
+            car_state.dl_wheelspeed_timestamp = tick;
+            break;
+        case MC_CANID_FAULTCODES:
+            memcpy_32((uint32_t*)&car_state.mc_faults, msg->data, 2);
+            car_state.mc_faults_timestamp = tick;
+            break;
+        case MC_CANID_VOLTAGEINFO:
+            memcpy_32((uint32_t*)&car_state.mc_vinfo, msg->data, 2);
+            car_state.mc_vinfo_timestamp = tick;
+            break;
+        case MC_CANID_INTERNALSTATES:
+            memcpy_32((uint32_t*)&car_state.mc_istates, msg->data, 2);
+            car_state.mc_istates_timestamp = tick;
+            break;
+        /* TODO: Reprogram/Reveal */
+        case VCU_CANID_PARAM_CHANGE:
+        	VCU_ParamSet* ps = (VCU_ParamSet*)msg->data;
+        	FLASH_storeVal(ps->id, ps->setValue, ps->write);
+        	apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
+        	break;
+        case VCU_CANID_PARAM_REQUEST:
+        	VCU_ParamReq* rq = (VCU_ParamSet*)msg->data;
+        	VCU_ParamReveal rv = { FLASH_getVal(rq->id), rq->id };
+        	CAN_sendmessage(DATA_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 void Shared_CANWatchdog() {
@@ -349,8 +398,8 @@ void Shared_control() {
     car_state.adc_dat = bl;
     LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
-    int max_torque = car_params->params.max_torque;
-
+    //int max_torque = car_params->params.max_torque;
+    int max_torque = 10;
     ControlReq_t tr = CTRL_getCommand(&apps_mult, &car_params->params, max_torque);
 
     /* the silly */
@@ -428,64 +477,4 @@ void clock_init() { /* turns up the speed to 250mhz */
 
     /* sets CAN source as PLL1 Q */
     RCC->CCIPR5 |= 0b01 << RCC_CCIPR5_FDCANSEL_Pos;
-}
-
-void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t l){
-    uint32_t * d = dest;
-    uint32_t * s = src;
-    
-    while (l > 0){
-        *d = *s;
-        d++;
-        s++;
-        l--;
-    }
-}
-
-void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data) {
-    int transfers = ((CAN_bytesFromDLC(dlc) - 1) >> 2) + 1;
-    uint32_t tick = RTOS_getMainTick();
-    if (bus == 0) 
-        car_state.last_can_timestamp1 = tick; 
-    if (bus == 1)
-        car_state.last_can_timestamp2 = tick; 
-
-    switch (id) {
-    case MC_CANID_HIGHSPEEDMESSAGE:
-        memcpy_32((uint32_t*)&car_state.mc_hsmsg, (uint32_t*)data, transfers);
-        car_state.mc_hsmsg_timestamp = tick;
-        break;
-    case DL_CANID_ACCEL:
-        memcpy_32((uint32_t*)&car_state.dl_accel, (uint32_t*)data, transfers);
-        car_state.dl_accel_timestamp = tick;
-        break;
-    case DL_CANID_WHEELSPEED:
-        memcpy_32((uint32_t*)&car_state.dl_wheelspeed, (uint32_t*)data, transfers);
-        car_state.dl_wheelspeed_timestamp = tick;
-        break;
-    case MC_CANID_FAULTCODES:
-        memcpy_32((uint32_t*)&car_state.mc_faults, (uint32_t*)data, transfers);
-        car_state.mc_faults_timestamp = tick;
-        break;
-    case MC_CANID_VOLTAGEINFO:
-        memcpy_32((uint32_t*)&car_state.mc_vinfo, (uint32_t*)data, transfers);
-        car_state.mc_vinfo_timestamp = tick;
-        break;
-    case MC_CANID_INTERNALSTATES:
-        memcpy_32((uint32_t*)&car_state.mc_istates, (uint32_t*)data, transfers);
-        car_state.mc_istates_timestamp = tick;
-        break;
-    /* TODO: Reprogram/Reveal */
-    case VCU_CANID_PARAM_CHANGE:
-    	VCU_ParamSet* ps = (VCU_ParamSet*)data;
-    	FLASH_storeVal(ps->id, ps->setValue, ps->write);
-    	apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
-    case VCU_CANID_PARAM_REQUEST:
-    	VCU_ParamReq* rq = (VCU_ParamSet*)data;
-    	VCU_ParamReveal rv = { FLASH_getVal(rq->id), rq->id };
-    	CAN_sendmessage(DATA_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
-        break;
-    default:
-        break;
-    }
 }

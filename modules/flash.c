@@ -4,7 +4,7 @@
 
 const volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
         sizeof(CarParameters_t),
-        { 1723, 681, 2322, 3361, 2031, 1023, 2055, 3056, 409, 3686, 35000 },
+        { 2369, 1452, 1710, 2634, 2991, 2059, 1079, 2014, 409, 3686, 35000 },
 		{ 1000, 100, 3000, 0},
         {
             10000000

@@ -4,6 +4,14 @@
 #include "can.h"
 #include "stm32h5xx.h"
 
+#define CAN_BUFFER_LEN 128
+CAN_Message_t buffer[CAN_BUFFER_LEN];
+
+/* Index of last CAN message put */
+uint16_t put_head = 0;
+/* Index of where the last message read is */
+uint16_t get_head = 0;
+
 void CAN_init() {
     /* Enable FDCAN clock */
     RCC->APB1HENR |= RCC_APB1HENR_FDCANEN;
@@ -67,6 +75,19 @@ void CAN_init() {
 
     FDCAN2->TXBC &= ~(1 << FDCAN_TXBC_TFQM_Pos); /* clear queue bit */
 
+    /* setup interrupts */
+    FDCAN1->IE |= FDCAN_IE_RF0NE | FDCAN_IE_RF1NE; 
+    FDCAN2->IE |= FDCAN_IE_RF0NE | FDCAN_IE_RF1NE;
+    FDCAN1->ILS |= FDCAN_ILS_RXFIFO1;
+    FDCAN2->ILS |= FDCAN_ILS_RXFIFO1;
+    FDCAN1->ILE |= 3;
+    FDCAN2->ILE |= 3;
+    
+    NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+    NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
+    NVIC_EnableIRQ(FDCAN2_IT0_IRQn);
+    NVIC_EnableIRQ(FDCAN2_IT1_IRQn);
+    
     FDCAN1->CCCR |= FDCAN_CCCR_FDOE;
     FDCAN2->CCCR |= FDCAN_CCCR_FDOE;
 
@@ -118,6 +139,18 @@ void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, ui
     FDCAN->TXBAR |= (1UL << j); /* Trigger message by writing to TX buffer */
 }
 
+void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t l){
+    uint32_t * d = dest;
+    uint32_t * s = src;
+    
+    while (l > 0){
+        *d = *s;
+        d++;
+        s++;
+        l--;
+    }
+}
+
 uint32_t _get_id(FDCAN_Rx_FIFO_Element_Typedef* msg) {
     return (msg->H0 & FDCAN_RXBH0_XTD_Msk) ? (msg->H0 & FDCAN_RXBH0_EXTID_Msk) :
             (msg->H0 & FDCAN_RXBH0_STDID_Msk) >> FDCAN_RXBH0_STDID_Pos;
@@ -131,47 +164,79 @@ uint32_t* _get_data(FDCAN_Rx_FIFO_Element_Typedef* msg) {
     return msg->data;
 }
 
-void CAN_recieveMessages(void (*callback)(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data)) {
-    uint32_t fifo_get_idx, fifo_end;
-    
-    fifo_get_idx = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
-    fifo_end = fifo_get_idx + (FDCAN1->RXF0S & FDCAN_RXF0S_F0FL_Msk);
-    for (int j = fifo_get_idx; j < fifo_end; j++) {
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo0 + (j % 3);
-        callback(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
-    }
-    if(fifo_get_idx != fifo_end) FDCAN1->RXF0A |= (fifo_end - 1) % 3;
-    
-    fifo_get_idx = (FDCAN1->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
-    fifo_end = fifo_get_idx + (FDCAN1->RXF1S & FDCAN_RXF1S_F1FL_Msk);
-    for (int j = fifo_get_idx; j < fifo_end; j++) {
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo1 + (j % 3);
-        callback(0, _get_id(msg), _get_dlc(msg), _get_data(msg));
-    }
-    if(fifo_get_idx != fifo_end) FDCAN1->RXF1A |= (fifo_end - 1) % 3;
+void CAN_recieveMessage(uint32_t id, uint16_t bus, uint16_t len, uint32_t * data) {
+    buffer[put_head] = (CAN_Message_t){id, len, bus, {data[0], data[1]}};
+    put_head++;
+    if (put_head == CAN_BUFFER_LEN) put_head = 0;
+}
 
-    fifo_get_idx = (FDCAN2->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
-    fifo_end = fifo_get_idx + (FDCAN2->RXF0S & FDCAN_RXF0S_F0FL_Msk);
-    for (int j = fifo_get_idx; j < fifo_end; j++) {
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo0 + (j % 3);
-        callback(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
-    }
-    if(fifo_get_idx != fifo_end) FDCAN2->RXF0A |= (fifo_end - 1) % 3;
+void CAN_recieve1RX0() {
+    uint32_t fifo_get_idx = (FDCAN1->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+    FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo0 + fifo_get_idx;
+    CAN_recieveMessage(_get_id(msg), 0, CAN_bytesFromDLC(_get_dlc(msg)), _get_data(msg));
+    FDCAN1->RXF0A = fifo_get_idx;
+}
 
-    fifo_get_idx = (FDCAN2->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
-    fifo_end = fifo_get_idx + (FDCAN2->RXF1S & FDCAN_RXF1S_F1FL_Msk);
-    for (int j = fifo_get_idx; j < fifo_end; j++) {
-        FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo1 + (j % 3);
-        callback(1, _get_id(msg), _get_dlc(msg), _get_data(msg));
-    }
-    if(fifo_get_idx != fifo_end) FDCAN2->RXF1A |= (fifo_end - 1) % 3;
+void CAN_recieve1RX1() {
+    uint32_t fifo_get_idx = (FDCAN1->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+    FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN1_RAM->rx_fifo1 + fifo_get_idx;
+    CAN_recieveMessage(_get_id(msg), 0, CAN_bytesFromDLC(_get_dlc(msg)), _get_data(msg));
+    FDCAN1->RXF1A = fifo_get_idx;
+}
+
+void CAN_recieve2RX0() {
+    uint32_t fifo_get_idx = (FDCAN2->RXF0S & FDCAN_RXF0S_F0GI_Msk) >> FDCAN_RXF0S_F0GI_Pos;
+    FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo0 + fifo_get_idx;
+    CAN_recieveMessage(_get_id(msg), 1, CAN_bytesFromDLC(_get_dlc(msg)), _get_data(msg));
+    FDCAN2->RXF0A = fifo_get_idx;
+}
+
+void CAN_recieve2RX1() {
+    uint32_t fifo_get_idx = (FDCAN2->RXF1S & FDCAN_RXF1S_F1GI_Msk) >> FDCAN_RXF1S_F1GI_Pos;
+    FDCAN_Rx_FIFO_Element_Typedef* msg = FDCAN2_RAM->rx_fifo1 + fifo_get_idx;
+    CAN_recieveMessage(_get_id(msg), 1, CAN_bytesFromDLC(_get_dlc(msg)), _get_data(msg));
+    FDCAN2->RXF1A = fifo_get_idx;
+}
+
+void fdcan1_it0_handler() {
+    CAN_recieve1RX0();
+    FDCAN1->IR |= FDCAN_IR_RF0N;
+}
+
+void fdcan1_it1_handler() {
+    CAN_recieve1RX1();
+    FDCAN1->IR |= FDCAN_IR_RF1N;
+}
+
+void fdcan2_it0_handler() {
+    CAN_recieve2RX0();
+    FDCAN2->IR |= FDCAN_IR_RF0N;
+}
+
+void fdcan2_it1_handler() {
+    CAN_recieve2RX1();
+    FDCAN2->IR |= FDCAN_IR_RF1N;
+}
+
+int CAN_rxCount() {
+    int l = put_head - get_head;
+    if (l < 0) l += CAN_BUFFER_LEN;
+    return l;
+}
+
+CAN_Message_t* CAN_getFirstMsg() {
+	if(get_head == put_head) return 0;
+    uint32_t old = get_head;
+    get_head++;
+    if (get_head == CAN_BUFFER_LEN) get_head = 0;
+
+    return buffer + old;
 }
 
 int CAN_bytesFromDLC(int dlc) {
     const int bytes[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64 };
     return bytes[dlc]; 
 }
-
 int CAN_DLCFromBytes(int bytes) {
     /* TODO */
 }
