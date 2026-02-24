@@ -63,7 +63,7 @@ typedef struct {
     uint16_t APPS4_h;
     uint16_t BPS_s_min;
     uint16_t BPS_s_max;
-    uint16_t BPS_f_bias;  /* p16 proportion - f_val / (f_val + r_val) - calculated by vcu reprogrammer */
+    uint16_t BPS_f_bias;  /* q16 proportion - f_val / ((f_val + r_val) - 1) - calculated by vcu reprogrammer */
 } ADC_Bounds_t;
 
 typedef struct {
@@ -77,7 +77,7 @@ typedef struct {
     int32_t  APPS4_mult;
     uint16_t BPS_b_mult; /* proportion of 300 bar */
     uint16_t BPS_f_mult; /* mult by 1 / fbias */
-    uint16_t BPS_r_mult; /* rear brake / total braking pressure in p15 format */
+    uint16_t BPS_r_mult; /* rear brake / total braking pressure in q15 format */
     uint16_t BPS_s_min;  /* sensor minimum */
 } ADC_Mult_t;
 

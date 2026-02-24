@@ -4,10 +4,15 @@
 /*
  * DEFINITIONS for motor controller usage as defined in this pdf:
  * https://www.cascadiamotion.com/_files/ugd/b5e2cb_e731a297509a4b2786cea7ef36199b7f.pdf
+ * 
+ * also for the rest of the car now.
  */ 
 
 #define MC_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
-#define VCU_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
+#define VCU_CANSTRUCT MC_CANSTRUCT
+#define DASH_CANSTRUCT MC_CANSTRUCT
+#define BMS_CANSTRUCT MC_CANSTRUCT
+#define DL_CANSTRUCT MC_CANSTRUCT 
 
 typedef int16_t     MC_Temperature;
 typedef int16_t     MC_LowVoltage;
@@ -32,6 +37,9 @@ typedef uint8_t     MC_Byte;
 
 #define DL_CANID_WHEELSPEED                0x001
 #define DL_CANID_ACCEL                     0x002
+
+#define DL_CANID_DASH_COMMAND              0x010
+#define DL_CANID_DASH_BATTMODE             0x011
 
 #define VCU_CANID_APPS_RAW                 0x101
 #define VCU_CANID_BPS_RAW              	   0x102
@@ -416,17 +424,18 @@ MC_CANSTRUCT {
     uint16_t HighData;
 } MC_ParameterCommand;
 
-VCU_CANSTRUCT {
+DL_CANSTRUCT {
     uint16_t wheelSpeed_FL;
     uint16_t wheelSpeed_FR;
     uint16_t wheelSpeed_BL;
     uint16_t wheelSpeed_BR;
 } DL_WheelSpeed;
 
-VCU_CANSTRUCT {
+DL_CANSTRUCT {
     uint16_t carAccel_X;
     uint16_t carAccel_Y;
     uint16_t yawRate;
+    /* steering angle ? */
 } DL_CarAcceleration;
 
 VCU_CANSTRUCT {
@@ -442,7 +451,7 @@ VCU_CANSTRUCT {
 } VCU_BpsRaw;
 
 VCU_CANSTRUCT {
-	uint8_t state;
+    uint8_t state;
 	uint8_t faultCounter    : 7;
     uint8_t pLatch          : 1;
     uint16_t lastValidTorqueReq;
@@ -463,4 +472,73 @@ VCU_CANSTRUCT {
 	uint16_t id;
 } VCU_ParamReq;
 
+/* 4 bytes if normal, 8 bytes if lapped */
+DL_CANSTRUCT {
+    uint16_t current_time; /* current time, in 100ths of a second */
+    int16_t pred_delta; /* predicted delta, in 100ths of a second */
+    uint16_t best_lap_time; /* best lap time, in 100ths of a second - for delta calculation */
+    uint16_t last_lap_time; /* last lap time, in 100ths of a second - for delta calculation */
+} DASH_TimeCommand;
 
+VCU_CANSTRUCT {
+    uint8_t battery_percentage; /* battery percentage */
+    uint8_t mode; /* boolean; do we switch mode this frame */
+} DASH_BattCommand;
+
+BMS_CANSTRUCT {
+    uint16_t discharge_limit;
+    uint16_t charge_limit;
+    uint32_t _RESERVED;
+} BMS_Limits;
+
+BMS_CANSTRUCT {
+    uint16_t relayState;
+    uint16_t failsafeState;
+    uint16_t DCT_status1;
+    uint16_t DCT_status2;
+} BMS_FaultsAndStatus;
+
+BMS_CANSTRUCT {
+    uint16_t pack_voltage;
+    uint16_t pack_current;
+    uint16_t pack_open_voltage;
+    uint16_t pack_resistance;
+} BMS_InstaneousValues;
+
+BMS_CANSTRUCT {
+    uint16_t pack_soc;
+    uint16_t pack_amphours;
+    uint16_t adaptive_soc;
+} BMS_InferredValues;
+
+BMS_CANSTRUCT {
+    
+} BMS_CellVoltageInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellTempInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellOpenVoltageInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellResistanceInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_Whatever1;
+
+BMS_CANSTRUCT {
+
+} BMS_Whatever2;
+
+BMS_CANSTRUCT {
+    uint16_t ac_current_limit;
+    uint16_t ac_power_limit;
+    uint16_t ac_voltage;
+    uint8_t  ac_plug_state;
+    uint8_t  _reserved;
+} BMS_J1772Info;
