@@ -44,11 +44,12 @@ const uint8_t   buttonNum     = 1;
 #define CTRL_CAN FDCAN1
 #define DATA_CAN FDCAN2
 
-#define LED_COLOR_IDLE      0x00FFFFFF /* light blue */
-#define LED_COLOR_RTD       0x00FF00FF /* green */
-#define LED_COLOR_FAULT     0xFF0000FF /* red */
-#define LED_COLOR_WAITING   0xFFFFFFFF /* white */
-#define LED_COLOR_SPECIAL   0x0000FFFF /* blue */
+#define LED_COLOR_IDLE      0x00FFFF0F /* light blue */
+#define LED_COLOR_RTD       0x00FF000F /* green */
+#define LED_COLOR_FAULT     0xFF00000F /* red */
+#define LED_COLOR_WAITING   0xFFFFFF0F /* white */
+#define LED_COLOR_SPECIAL   0x0000FF0F /* blue */
+#define LED_COLOR_RESET   	0xFFA0000F /* yellowish - orange */
 #define LED_COLOR_LEDOFF    0x00000000 /* black */
 
 /*
@@ -56,9 +57,9 @@ const uint8_t   buttonNum     = 1;
  */
 #define TRACTION_CONTROL            0 /* does nothing rn */
 #define REGENBRAKING_ENABLED        0 /* does nothing rn */
-#define MC_WATCHDOG_ENABLED         0 /* drops out of ready to drive upon a fault */
-#define MC_ON_BABYSITTING           0 /* enables waiting for motor controller to get enabled */
-#define MC_RESET_LOOP               0 /* enables reset loop */
+#define MC_WATCHDOG_ENABLED         1 /* drops out of ready to drive upon a fault */
+#define MC_ON_BABYSITTING           1 /* enables waiting for motor controller to get enabled */
+#define MC_RESET_LOOP               1 /* enables reset loop */
 #define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds - bad idea on test harness */
 #define IGNORE_BRAKES               1 /* ignores brakes when checking for rtd and plaus */
 
@@ -77,7 +78,9 @@ const uint8_t   buttonNum     = 1;
                             MC_PFAULT_PRECHARGE_FAILURE | \
                             MC_PFAULT_PRECHARGE_TIMEOUT | \
                             MC_PFAULT_DC_BUS_VOLT_LOW   | \
+                            MC_PFAULT_POST_DESATURATION | \
                             \
+							MC_RFAULT_GATE_DESATURATION | \
                             MC_RFAULT_CAN_COMMAND_LOST  | \
                             MC_RFAULT_RESOLVER_DISCONNECTED \
                             )
@@ -107,7 +110,8 @@ struct {
 
     uint32_t last_can_timestamp1; /* any message, fdcan1 */
     uint32_t last_can_timestamp2; /* any message, fdcan2 */
-   
+    uint32_t last_mc_reset_timestamp;
+
     /* more timestamps */
     uint32_t mc_hsmsg_timestamp;
     uint32_t mc_faults_timestamp;
@@ -121,7 +125,7 @@ void clock_init();
 
 void MC_sendCommand();
 void MC_sendStop();
-int MC_faultedR() { return (MC_RESET_BITMASK & car_state.mc_faults.runtimeErrors); }
+int MC_faultedR() { return (MC_RESET_BITMASK & *(uint64_t*)&car_state.mc_faults); }
 int MC_faulted()  { return car_state.mc_faults.postErrors || car_state.mc_faults.runtimeErrors; }
 
 void Shared_processCAN();
@@ -133,12 +137,14 @@ void RTD_input();
 void Idle_input();
 void Reset_input();
 
-void Reset_start();
 void RTD_start();
 void Idle_start();
+void Reset_start();
+void MCInit_start();
 
 void MCInit_loop();
-void MCInit_start();
+
+void Reset_MC();
 
 void BUZZERON()  { GPIOB->ODR |= GPIO_ODR_OD10;  }
 void BUZZEROFF() { GPIOB->ODR &= ~GPIO_ODR_OD10; }
@@ -147,12 +153,13 @@ void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data);
 void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t byte_size);
 void systick_handler() { RTOS_Update(); }
 
-const int control_period        = 200;
-const int mc_command_period     =   5;
-const int process_can_period    =   1;
-const int diagnostics_period    = 250;
-const int input_period          =  50;
-const int mc_watchdog_period    = 999;
+const int control_period        =   200;
+const int mc_command_period     =     5;
+const int process_can_period    =     1;
+const int diagnostics_period    =   250;
+const int input_period          =    50;
+const int mc_watchdog_period    =   999;
+const int mc_reset_period       =  1499;
 
 CarParameters_t* car_params;
 ADC_Mult_t apps_mult = { 0 };
@@ -166,7 +173,6 @@ int main(void) {
     clock_init();
     GPIO_init();
     RTOS_init();
-    CAN_init();
     CTRL_ADCinit();
 
     logging_init();
@@ -200,11 +206,15 @@ int main(void) {
     RTOS_scheduleTask(car_state.state_reset, Reset_input, input_period);
 
     RTOS_scheduleTask(car_state.state_mcinit, MCInit_loop, mc_command_period);
+    
+    RTOS_scheduleTask(car_state.state_reset, Reset_MC, mc_reset_period);
 
     RTOS_switchState(car_state.state_idle);
 
     car_params = FLASH_getVals();
     apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
+
+    CAN_init();
 
     LOG("Hello World!\n");
     LOGLN("CLOCK CHECK: %d", SysTick->LOAD + 1);
@@ -244,7 +254,7 @@ void MC_watchdog() {
     
     if (MC_faultedR() && MC_RESET_LOOP)
         RTOS_switchState(car_state.state_reset);
-    else if (MC_faulted()){
+    else if (MC_faulted()) {
         RTOS_switchState(car_state.state_idle);
     }
 }
@@ -261,6 +271,10 @@ void Idle_input() {
 
     if (MC_faulted()) {
         GPIO_setLED(LED_COLOR_FAULT);
+        if (MC_faultedR() && MC_RESET_LOOP) {
+            RTOS_switchState(car_state.state_reset);
+            return;
+        }
     } else {
         GPIO_setLED(LED_COLOR_IDLE);
     }
@@ -276,18 +290,33 @@ void Idle_input() {
 }
 
 /* ======= Reset Specific Functionality ======== */
+void Reset_MC(){
+    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg);
+}
+
 void Reset_start() {
-    GPIO_setLED(LED_COLOR_FAULT);
+    GPIO_setLED(LED_COLOR_RESET);
+    Reset_MC();
 }
 
 void Reset_input() {
 	GPIO_Update(RTOS_getMainTick());
 
-    if (!MC_RESET_LOOP) 
+    if (!MC_RESET_LOOP) {
         RTOS_switchState(car_state.state_idle);
+    }
 
-    if (!MC_faultedR() && MC_faulted()) {
+    int fltr = MC_faultedR();
+    int flt = MC_faulted();
+
+    if (!fltr && flt) {
         RTOS_switchState(car_state.state_idle);
+        return;
+    }
+
+    if (!flt) {
+    	RTOS_switchState(car_state.state_idle);
+        return;
     }
 
     /* if pressed, cancel reset sequence */
@@ -298,9 +327,6 @@ void Reset_input() {
     }
 }
 
-void MC_Reset(){
-    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg);
-}
 
 /* ======= MC Init Specific Functionality ======= */
 void MCInit_start() {
@@ -312,7 +338,7 @@ void MCInit_start() {
 void MCInit_loop() {
     if (car_state.mc_istates.vsmState == 7)
         RTOS_switchState(MC_RESET_LOOP ? car_state.state_reset : car_state.state_idle);
-    if (car_state.mc_istates.vsmState == 6 || !MC_ON_BABYSITTING)
+    else if (car_state.mc_istates.vsmState == 6 || !MC_ON_BABYSITTING)
         RTOS_switchState(car_state.state_rtd);
 }
 
@@ -368,9 +394,9 @@ void Shared_processCAN() {
         	apps_mult = CTRL_getADCMultiplers(&car_params->adc_bounds);
         	break;
         case VCU_CANID_PARAM_REQUEST:
-        	VCU_ParamReq* rq = (VCU_ParamSet*)msg->data;
+        	VCU_ParamReq* rq = (VCU_ParamReq*)msg->data;
         	VCU_ParamReveal rv = { FLASH_getVal(rq->id), rq->id };
-        	CAN_sendmessage(DATA_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
+        	CAN_sendmessage(msg->bus_id ? DATA_CAN : CTRL_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
             break;
         default:
             break;
@@ -399,7 +425,7 @@ void Shared_control() {
     LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
     //int max_torque = car_params->params.max_torque;
-    int max_torque = 10;
+    int max_torque = 200;
     ControlReq_t tr = CTRL_getCommand(&apps_mult, &car_params->params, max_torque);
 
     /* the silly */
@@ -430,6 +456,9 @@ void Shared_control() {
             command_msg.torqueCommand = 0;
         }
     }
+
+    car_state.last_ctrl_vec = tr;
+    car_state.last_ctrl_vec.torque = command_msg.torqueCommand;
 
     LOG("%d %d %d %d\n", command_msg.torqueCommand, car_state.fault_counter, tr.torque, tr.flags);
 }

@@ -2,7 +2,7 @@
 #include "stm32h533xx.h"
 #include <stdint.h>
 
-const volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
+volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
         sizeof(CarParameters_t),
         { 2369, 1452, 1710, 2634, 2991, 2059, 1079, 2014, 409, 3686, 35000 },
 		{ 1000, 100, 3000, 0},
@@ -123,10 +123,24 @@ void FLASH_EraseHighCycle() {
 };
 
 volatile CarParameters_t* FLASH_getVals(){
-	uint16_t* sv_ptr = (uint16_t*)&stored_values;
+	const int use_default = 1;
 	uint16_t* rm_ptr = (uint16_t*)&ram_values;
 
+	CarParameters_t default_vals = {
+			sizeof(CarParameters_t),
+			{ 1898, 3314, 2199, 768, 1944, 3480, 2191, 655, 409, 3686, 35000 },
+			{ 200, 100, 3000, 0},
+	        {
+	            10000000
+	        }};
+
+	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)&stored_values;
 	const int writes = sizeof(CarParameters_t) / 2;
+	if (use_default){
+		FLASH_EraseHighCycle();
+		FLASH_WriteSector(&default_vals, 0, sizeof(ram_values));
+	}
+
 	if (!ram_initialized) {
 		for(int i = 0; i < writes; i++){
 			rm_ptr[i] = sv_ptr[i];
@@ -154,7 +168,7 @@ int FLASH_getVal(int id){
 			return (int)ram_values.adc_bounds.APPS3_l;
 			break;
 		case FLASH_PARAMID_APPS3_H: 
-			return (int)ram_values.adc_bounds.APPS3_l;
+			return (int)ram_values.adc_bounds.APPS3_h;
 			break;
 		case FLASH_PARAMID_APPS4_L: 
 			return (int)ram_values.adc_bounds.APPS4_l;
@@ -202,7 +216,7 @@ void FLASH_storeVal(int id, int newVal, int write){
 			ram_values.adc_bounds.APPS3_l = (uint16_t)newVal;
 			break;
 		case FLASH_PARAMID_APPS3_H: 
-			ram_values.adc_bounds.APPS3_l = (uint16_t)newVal;
+			ram_values.adc_bounds.APPS3_h = (uint16_t)newVal;
 			break;
 		case FLASH_PARAMID_APPS4_L: 
 			ram_values.adc_bounds.APPS4_l = (uint16_t)newVal;

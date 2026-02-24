@@ -63,7 +63,7 @@ void CAN_init() {
     FDCAN2->CCCR |= FDCAN_CCCR_DAR; /* disable automatic retransmission */
 
     /* clock in is at 125mhz (set in clock config), there are 4 divs and the first seg is 2 long */
-    FDCAN2->NBTP = (CAN2_BAUD_PRES << FDCAN_NBTP_NBRP_Pos) |
+    FDCAN2->NBTP = (24 << FDCAN_NBTP_NBRP_Pos) |
                    (2 << FDCAN_NBTP_NTSEG1_Pos) |
                    (0 << FDCAN_NBTP_NTSEG2_Pos) |
                    (0 << FDCAN_NBTP_NSJW_Pos);

@@ -157,18 +157,19 @@ ADC_Mult_t CTRL_getADCMultiplers(volatile ADC_Bounds_t* bounds) {
     mult.APPS3_strt = bounds->APPS3_l;
     mult.APPS4_strt = bounds->APPS4_l;
 
-    mult.APPS1_mult = 65536L / ((int32_t)bounds->APPS1_h - bounds->APPS1_l);
-    mult.APPS2_mult = 65536L / ((int32_t)bounds->APPS2_h - bounds->APPS2_l);
-    mult.APPS3_mult = 65536L / ((int32_t)bounds->APPS3_h - bounds->APPS3_l);
-    mult.APPS4_mult = 65536L / ((int32_t)bounds->APPS4_h - bounds->APPS4_l);
+    /* TODO: get rid of all + 1s */
+    mult.APPS1_mult = 65536L / ((int32_t)bounds->APPS1_h + 1 - bounds->APPS1_l);
+    mult.APPS2_mult = 65536L / ((int32_t)bounds->APPS2_h + 1 - bounds->APPS2_l);
+    mult.APPS3_mult = 65536L / ((int32_t)bounds->APPS3_h + 1 - bounds->APPS3_l);
+    mult.APPS4_mult = 65536L / ((int32_t)bounds->APPS4_h + 1 - bounds->APPS4_l);
 
     /* gets brake pressure as a proportion */
     volatile uint32_t b = (bounds->BPS_s_max - bounds->BPS_s_min) * 2;
-    volatile uint32_t h = ((uint32_t)bounds->BPS_f_bias * b) >> 16;
+    volatile uint32_t h = (((uint32_t)bounds->BPS_f_bias * b) >> 16) + 1;
     mult.BPS_f_mult = (65536UL / h);
-    h = ((65535UL - bounds->BPS_f_bias) * b) >> 16;
+    h = (((65535UL - bounds->BPS_f_bias) * b) >> 16) + 1;
     mult.BPS_r_mult = (65536UL / h);
-    h = b;
+    h = b + 1;
     mult.BPS_b_mult = (65536UL / h);
     mult.BPS_s_min = bounds->BPS_s_min;
     return mult;

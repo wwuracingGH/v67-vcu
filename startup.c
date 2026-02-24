@@ -24,15 +24,15 @@ void reset_handler(void);
 void default_handler(void);
 
 /* Cortex-M system exceptions */
-void nmi_handler(void) __attribute__((weak, alias("default_handler")));
-void hard_fault_handler(void) __attribute__((weak, alias("default_handler")));
-void mem_manage(void) __attribute__((weak, alias("default_handler")));
-void bus_fault(void) __attribute__((weak, alias("default_handler")));
-void usage_fault(void) __attribute__((weak, alias("default_handler")));
-void secure_fault(void) __attribute__((weak, alias("default_handler")));
-void svcall_handler(void) __attribute__((weak, alias("default_handler")));
-void dbg_monitor_handler(void) __attribute__((weak, alias("default_handler")));
-void pendsv_handler(void) __attribute__((weak, alias("default_handler")));
+void nmi_handler(void) {default_handler();}
+void hard_fault_handler(void) {default_handler();}
+void mem_manage(void) {default_handler();}
+void bus_fault(void) {default_handler();}
+void usage_fault(void) {default_handler();}
+void secure_fault(void) {default_handler();}
+void svcall_handler(void) {default_handler();}
+void dbg_monitor_handler(void) {default_handler();}
+void pendsv_handler(void) {default_handler();}
 void systick_handler(void) __attribute__((weak, alias("default_handler")));
 
 /* STM32H533 Interrupts */
