@@ -1,6 +1,18 @@
-//this is not my code
-//i will rewrite it at some point
+/*
+ * Nicole Swierstra, Renee Anderson
+ *
+ * Boilerplate NVIC and memory initialization
+ * 
+ * Might include RAM execution in the future but the H533's bus isn't really setup for that
+ * Should at least include Instruction Cacheing tho
+ * 
+ * Based on STM32 Without CubeIDE's startup.c
+ */
 #include <stdint.h>
+#ifndef STM32H533xx
+#define STM32H533xx
+#endif
+#include "vendor/CMSIS/Device/ST/STM32H5/Include/stm32h533xx.h"
 
 #define SRAM_START (0x20000000U)
 #define SRAM_SIZE (272UL * 1024UL)
@@ -11,19 +23,19 @@
 void reset_handler(void);
 void default_handler(void);
 
-// Cortex-M system exceptions
-void nmi_handler(void) __attribute__((weak, alias("default_handler")));
-void hard_fault_handler(void) __attribute__((weak, alias("default_handler")));
-void mem_manage(void) __attribute__((weak, alias("default_handler")));
-void bus_fault(void) __attribute__((weak, alias("default_handler")));
-void usage_fault(void) __attribute__((weak, alias("default_handler")));
-void secure_fault(void) __attribute__((weak, alias("default_handler")));
-void svcall_handler(void) __attribute__((weak, alias("default_handler")));
-void debug_monitor_handler(void) __attribute__((weak, alias("default_handler")));
-void pendsv_handler(void) __attribute__((weak, alias("default_handler")));
+/* Cortex-M system exceptions */
+void nmi_handler(void) {default_handler();}
+void hard_fault_handler(void) {default_handler();}
+void mem_manage(void) {default_handler();}
+void bus_fault(void) {default_handler();}
+void usage_fault(void) {default_handler();}
+void secure_fault(void) {default_handler();}
+void svcall_handler(void) {default_handler();}
+void dbg_monitor_handler(void) {default_handler();}
+void pendsv_handler(void) {default_handler();}
 void systick_handler(void) __attribute__((weak, alias("default_handler")));
 
-// STM32F410RB interrupt handlers
+/* STM32H533 Interrupts */
 void wwdg_handler(void) __attribute__((weak, alias("default_handler")));
 void pvd_handler(void) __attribute__((weak, alias("default_handler")));
 void rtc_handler(void) __attribute__((weak, alias("default_handler")));
@@ -61,8 +73,6 @@ void gpdma1_ch7_handler(void) __attribute__((weak, alias("default_handler")));
 void iwdg_handler(void) __attribute__((weak, alias("default_handler")));
 void adc1_handler(void) __attribute__((weak, alias("default_handler")));
 void dac1_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan_it0_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan_it1_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_brk_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_up_handler(void) __attribute__((weak, alias("default_handler")));
 void tim1_trg_com_handler(void) __attribute__((weak, alias("default_handler")));
@@ -116,8 +126,6 @@ void fpu_handler(void) __attribute__((weak, alias("default_handler")));
 void icache_handler(void) __attribute__((weak, alias("default_handler")));
 void dcache_handler(void) __attribute__((weak, alias("default_handler")));
 void dcmi_pssi_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan2_it0_handler(void) __attribute__((weak, alias("default_handler")));
-void fdcan2_it1_handler(void) __attribute__((weak, alias("default_handler")));
 void dts_handler(void) __attribute__((weak, alias("default_handler")));
 void rng_handler(void) __attribute__((weak, alias("default_handler")));
 void otfdec1_handler(void) __attribute__((weak, alias("default_handler")));
@@ -131,9 +139,14 @@ void i3c1_er(void) __attribute__((weak, alias("default_handler")));
 void i3c2_ev(void) __attribute__((weak, alias("default_handler")));
 void i3c2_er(void) __attribute__((weak, alias("default_handler")));
 
+extern void fdcan1_it0_handler();
+extern void fdcan1_it1_handler();
+extern void fdcan2_it0_handler();
+extern void fdcan2_it1_handler();
+
 uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector"))) = {
     STACK_POINTER_INIT_ADDRESS,         /* 0x00 */
-    // Cortex-M system exceptions
+    /* Cortex-M system exceptions */
     (uint32_t)&reset_handler,           /* 0x04 */
     (uint32_t)&nmi_handler,             /* 0x08 */
     (uint32_t)&hard_fault_handler,      /* 0x0C */
@@ -145,11 +158,11 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
     0,                                  /* 0x24 */
     0,                                  /* 0x28 */
     (uint32_t)&svcall_handler,          /* 0x2C */
-    (uint32_t)&debug_monitor_handler,   /* 0x30 */
+    (uint32_t)&dbg_monitor_handler,     /* 0x30 */
     0,                                  /* 0x34 */
     (uint32_t)&pendsv_handler,          /* 0x38 */
     (uint32_t)&systick_handler,         /* 0x3C */
-    // STM32H533 interrupt handlers
+    /* STM32H533 interrupt handlers */
     (uint32_t)&wwdg_handler,            /* 0x40 */
     (uint32_t)&pvd_handler,             /* 0x44 */
     (uint32_t)&rtc_handler,             /* 0x48 */
@@ -189,8 +202,8 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
     0,                                  /* 0xD0 */
     (uint32_t)&adc1_handler,            /* 0xD4 */
     (uint32_t)&dac1_handler,            /* 0xD8 */
-    (uint32_t)&fdcan_it0_handler,       /* 0xDC */
-    (uint32_t)&fdcan_it1_handler,       /* 0xE0 */
+    (uint32_t)&fdcan1_it0_handler,       /* 0xDC */
+    (uint32_t)&fdcan1_it1_handler,       /* 0xE0 */
     (uint32_t)&tim1_brk_handler,        /* 0xE4 */
     (uint32_t)&tim1_up_handler,         /* 0xE8 */
     (uint32_t)&tim1_trg_com_handler,    /* 0xEC */
@@ -286,67 +299,67 @@ uint32_t isr_vector[ISR_VECTOR_SIZE_WORDS] __attribute__((section(".isr_vector")
     0                                   /* 0x254 */
 };
 
-extern uint32_t _etext, _sdata, _edata, _sbss, _ebss, _sidata;
+extern volatile uint32_t _etext, _sdata, _edata, _sbss, _ebss, _sidata;
 void main(void);
 
-void reset_handler(void)
-{
-    /* SCB->CPACR, should enable hardware floating point*/
+void reset_handler(void) {
+    /* SCB->CPACR, should enable hardware floating point */
     *(uint32_t*)(0xE000ED88UL) |= ((3UL << 20U)|(3UL << 22U));
 
-    // Copy .data from FLASH to SRAM
-    uint32_t data_size = (uint32_t)&_edata - (uint32_t)&_sdata;
-    uint8_t *flash_data = (uint8_t*) &_sidata; // Data load address (in flash)
-    uint8_t *sram_data = (uint8_t*) &_sdata; // Data virtual address (in sram)
-    
-    for (uint32_t i = 0; i < data_size; i++)
-    {
+    /* Copy .data from FLASH to SRAM */
+    volatile uint32_t data_size = (uint32_t)&_edata - (uint32_t)&_sdata;
+    volatile uint8_t *flash_data = (uint8_t*) &_sidata; /* Data load address (in flash) */
+    volatile uint8_t *sram_data = (uint8_t*) &_sdata; /* Data virtual address (in sram) */
+
+    for (uint32_t i = 0; i < data_size; i++) {
         sram_data[i] = flash_data[i];
     }
 
-    // Zero-fill .bss section in SRAM
-    uint32_t bss_size = (uint32_t)&_ebss - (uint32_t)&_sbss;
-    uint8_t *bss = (uint8_t*) &_sbss;
+    /* Zero-fill .bss section in SRAM */
+    volatile uint32_t bss_size = (uint32_t)&_ebss - (uint32_t)&_sbss;
+    volatile uint8_t *bss = (uint8_t*) &_sbss;
 
-    for (uint32_t i = 0; i < bss_size; i++)
-    {
+    for (volatile uint32_t i = 0; i < bss_size; i++) {
         bss[i] = 0;
     }
-    
+
+    /* Call main processor logic */
     main();
 }
 
-void default_handler(void)
-{
-    while(1);
+void default_handler(void) {
+    /* TODO: error handling? */
+    while (1);
 }
 
-extern void* memset(void* b, int c, unsigned int len)
-{
-    uint8_t *p = b;
-    while(len > 0)
-        {
-            *p = c;
-            p++;
-            len--;
-        }
-    return(b);
+extern void* memset(void* dest, int c, unsigned int len) {
+    uint8_t *p = dest;
+
+    while (len > 0) {
+        *p = c;
+        p++;
+        len--;
+    }
+
+    return dest;
 }
 
-extern void * memcpy(void *dest, const void *src, unsigned int n)  
-{    
-    uint8_t *csrc = (uint8_t *)src;  
-    uint8_t *cdest = (uint8_t *)dest;  
-  
-    // Copy contents of src[] to dest[]  
-    for (uint32_t i=0; i<n; i++)  
-        cdest[i] = csrc[i];  
-    
-    return (dest);
+extern void * memcpy(void *dest, const void *src, unsigned int len) {
+    uint8_t * p = dest;
+    uint8_t * s = src;
+
+    while (len > 0) {
+        *p = *s;
+        p++;
+        s++;
+        len--;
+    }
+
+    return dest;
 }
 
 
-//shit function lol (decommissioned but still in our hearts)
+/* shit function lol (decommissioned but still in our hearts) */
 /*
 extern uint32_t __aeabi_uidivmod(uint32_t u, uint32_t v){
     uint32_t div = u;
