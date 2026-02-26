@@ -3,11 +3,16 @@
 
 /*
  * DEFINITIONS for motor controller usage as defined in this pdf:
- * https://app.box.com/s/vf9259qlaadhzxqiqrt5cco8xpsn84hk/file/27334613044
+ * https://www.cascadiamotion.com/_files/ugd/b5e2cb_e731a297509a4b2786cea7ef36199b7f.pdf
+ * 
+ * also for the rest of the car now.
  */ 
 
 #define MC_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
-#define VCU_CANSTRUCT typedef struct __attribute__((packed, scalar_storage_order("little-endian")))
+#define VCU_CANSTRUCT MC_CANSTRUCT
+#define DASH_CANSTRUCT MC_CANSTRUCT
+#define BMS_CANSTRUCT MC_CANSTRUCT
+#define DL_CANSTRUCT MC_CANSTRUCT 
 
 typedef int16_t     MC_Temperature;
 typedef int16_t     MC_LowVoltage;
@@ -30,16 +35,19 @@ typedef int16_t     MC_Int;
 typedef uint16_t    MC_UnsignedInt;
 typedef uint8_t     MC_Byte;
 
-#define VCU_CANID_APPS_RAW                 0x001
-#define VCU_CANID_CALIBRATION              0x002
-#define VCU_CANID_WHEELSPEED               0x003
-#define VCU_CANID_ACCEL                    0x004
-#define VCU_CANID_STATE                    0x005
-#define VCU_CANID_REPROGRAMAPPS            0x006
-#define VCU_CANID_REPROGRAMCONTROL         0x007
-#define VCU_CANID_REVEAL_VALS              0x008
-#define VCU_CANID_APPS_VALS                0x009
-#define VCU_CANID_CONTROL_VALS             0x00A
+#define DL_CANID_WHEELSPEED                0x001
+#define DL_CANID_ACCEL                     0x002
+
+#define DL_CANID_DASH_COMMAND              0x010
+#define DL_CANID_DASH_BATTMODE             0x011
+
+#define VCU_CANID_APPS_RAW                 0x101
+#define VCU_CANID_BPS_RAW              	   0x102
+#define VCU_CANID_CTRL_VEC                 0x103
+#define VCU_CANID_VCU_STATE            	   0x104
+#define VCU_CANID_PARAM_REVEAL             0x105
+#define VCU_CANID_PARAM_CHANGE             0x106
+#define VCU_CANID_PARAM_REQUEST            0x107
 
 #define MC_CANID_TEMPERATURE1              0x0A0
 #define MC_CANID_TEMPERATURE2              0x0A1
@@ -416,28 +424,121 @@ MC_CANSTRUCT {
     uint16_t HighData;
 } MC_ParameterCommand;
 
-VCU_CANSTRUCT {
+DL_CANSTRUCT {
     uint16_t wheelSpeed_FL;
     uint16_t wheelSpeed_FR;
     uint16_t wheelSpeed_BL;
     uint16_t wheelSpeed_BR;
 } DL_WheelSpeed;
 
-VCU_CANSTRUCT {
+DL_CANSTRUCT {
     uint16_t carAccel_X;
     uint16_t carAccel_Y;
+    uint16_t yawRate;
+    /* steering angle ? */
 } DL_CarAcceleration;
 
 VCU_CANSTRUCT {
-    uint16_t new_APPS1_MIN;
-    uint16_t new_APPS1_MAX;
-    uint16_t new_APPS2_MIN;
-    uint16_t new_APPS2_MAX;
-} VCU_ReprogramApps;
+	uint16_t apps1;
+	uint16_t apps2;
+	uint16_t apps3;
+	uint16_t apps4;
+} VCU_AppsRaw;
 
 VCU_CANSTRUCT {
-    uint16_t new_MaxTorqueReq;
-    uint16_t new_MinRegenReq;
-    uint16_t new_MinRegenSpeed;
-    uint16_t new_BrakeThreashold;
-} VCU_ReprogramControl;
+	uint16_t fbps;
+	uint16_t rbps;
+} VCU_BpsRaw;
+
+VCU_CANSTRUCT {
+    uint8_t state;
+	uint8_t faultCounter    : 7;
+    uint8_t pLatch          : 1;
+    uint16_t lastValidTorqueReq;
+} VCU_VCUState;
+
+VCU_CANSTRUCT {
+	uint32_t setValue;
+	uint16_t id;
+} VCU_ParamReveal;
+
+VCU_CANSTRUCT {
+	uint32_t setValue;
+	uint16_t id : 15;
+	uint16_t write : 1;
+} VCU_ParamSet;
+
+VCU_CANSTRUCT {
+	uint16_t id;
+} VCU_ParamReq;
+
+/* 4 bytes if normal, 8 bytes if lapped */
+DL_CANSTRUCT {
+    uint16_t current_time; /* current time, in 100ths of a second */
+    int16_t pred_delta; /* predicted delta, in 100ths of a second */
+    uint16_t best_lap_time; /* best lap time, in 100ths of a second - for delta calculation */
+    uint16_t last_lap_time; /* last lap time, in 100ths of a second - for delta calculation */
+} DASH_TimeCommand;
+
+VCU_CANSTRUCT {
+    uint8_t battery_percentage; /* battery percentage */
+    uint8_t mode; /* boolean; do we switch mode this frame */
+} DASH_BattCommand;
+
+BMS_CANSTRUCT {
+    uint16_t discharge_limit;
+    uint16_t charge_limit;
+    uint32_t _RESERVED;
+} BMS_Limits;
+
+BMS_CANSTRUCT {
+    uint16_t relayState;
+    uint16_t failsafeState;
+    uint16_t DCT_status1;
+    uint16_t DCT_status2;
+} BMS_FaultsAndStatus;
+
+BMS_CANSTRUCT {
+    uint16_t pack_voltage;
+    uint16_t pack_current;
+    uint16_t pack_open_voltage;
+    uint16_t pack_resistance;
+} BMS_InstaneousValues;
+
+BMS_CANSTRUCT {
+    uint16_t pack_soc;
+    uint16_t pack_amphours;
+    uint16_t adaptive_soc;
+} BMS_InferredValues;
+
+BMS_CANSTRUCT {
+    
+} BMS_CellVoltageInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellTempInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellOpenVoltageInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_CellResistanceInfo;
+
+BMS_CANSTRUCT {
+
+} BMS_Whatever1;
+
+BMS_CANSTRUCT {
+
+} BMS_Whatever2;
+
+BMS_CANSTRUCT {
+    uint16_t ac_current_limit;
+    uint16_t ac_power_limit;
+    uint16_t ac_voltage;
+    uint8_t  ac_plug_state;
+    uint8_t  _reserved;
+} BMS_J1772Info;
