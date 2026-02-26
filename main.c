@@ -193,6 +193,7 @@ int main(void) {
     RTOS_scheduleTask(RTOS_ALL_STATES, Shared_CANWatchdog, mc_watchdog_period);
 
     RTOS_scheduleTask(car_state.state_rtd, MC_sendCommand, mc_command_period);
+    RTOS_scheduleTask(car_state.state_rtd, MC_watchdog, mc_watchdog_period);
 
     RTOS_scheduleTask(car_state.state_idle, MC_sendStop, mc_command_period);
     RTOS_scheduleTask(car_state.state_mcinit, MC_sendStop, mc_command_period);
@@ -251,10 +252,10 @@ void MC_sendCommand() {
 
 void MC_watchdog() {
     if(!MC_WATCHDOG_ENABLED) return;
-    
-    if (MC_faultedR() && MC_RESET_LOOP)
-        RTOS_switchState(car_state.state_reset);
-    else if (MC_faulted()) {
+    /* disabled because of change in state diagram*/
+    // if (MC_faultedR() && MC_RESET_LOOP)
+    //     RTOS_switchState(car_state.state_reset);
+    if (MC_faulted()) {
         RTOS_switchState(car_state.state_idle);
     }
 }
@@ -271,10 +272,11 @@ void Idle_input() {
 
     if (MC_faulted()) {
         GPIO_setLED(LED_COLOR_FAULT);
-        if (MC_faultedR() && MC_RESET_LOOP) {
-            RTOS_switchState(car_state.state_reset);
-            return;
-        }
+            /* disabled because of change in state diagram*/
+        // if (MC_faultedR() && MC_RESET_LOOP) {
+        //     RTOS_switchState(car_state.state_reset);
+        //     return;
+        // }
     } else {
         GPIO_setLED(LED_COLOR_IDLE);
     }
@@ -284,8 +286,11 @@ void Idle_input() {
 
     if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD) && car_state.last_valid_tr < 10) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD);
-
-        RTOS_switchState(car_state.state_mcinit);
+        if(MC_faultedR()){
+            RTOS_switchState(car_state.state_reset)
+        } else{
+            RTOS_switchState(car_state.state_mcinit);
+        }
     }
 }
 
@@ -337,7 +342,7 @@ void MCInit_start() {
 
 void MCInit_loop() {
     if (car_state.mc_istates.vsmState == 7)
-        RTOS_switchState(MC_RESET_LOOP ? car_state.state_reset : car_state.state_idle);
+        RTOS_switchState(car_state.state_idle);
     else if (car_state.mc_istates.vsmState == 6 || !MC_ON_BABYSITTING)
         RTOS_switchState(car_state.state_rtd);
 }
