@@ -132,6 +132,7 @@ void Shared_processCAN();
 void Shared_control();
 void Shared_diagnostics();
 void Shared_CANWatchdog();
+void MC_watchdog();
 
 void RTD_input();
 void Idle_input();
@@ -286,8 +287,8 @@ void Idle_input() {
 
     if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD) && car_state.last_valid_tr < 10) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD);
-        if(MC_faultedR()){
-            RTOS_switchState(car_state.state_reset)
+        if(MC_faulted()){
+            RTOS_switchState(car_state.state_reset);
         } else{
             RTOS_switchState(car_state.state_mcinit);
         }
@@ -314,13 +315,13 @@ void Reset_input() {
     int fltr = MC_faultedR();
     int flt = MC_faulted();
 
-    if (!fltr && flt) {
-        RTOS_switchState(car_state.state_idle);
-        return;
-    }
+//    if (!fltr && flt) {
+//        RTOS_switchState(car_state.state_idle);
+//        return;
+//    }
 
     if (!flt) {
-    	RTOS_switchState(car_state.state_idle);
+    	RTOS_switchState(car_state.state_mcinit);
         return;
     }
 
@@ -336,6 +337,9 @@ void Reset_input() {
 /* ======= MC Init Specific Functionality ======= */
 void MCInit_start() {
     GPIO_setLED(LED_COLOR_WAITING);
+    // disable lockout
+    command_msg.inverterEnable = 0;
+    MC_sendCommand();
     command_msg.inverterEnable = 1;
     MC_sendCommand();
 }
@@ -345,6 +349,9 @@ void MCInit_loop() {
         RTOS_switchState(car_state.state_idle);
     else if (car_state.mc_istates.vsmState == 6 || !MC_ON_BABYSITTING)
         RTOS_switchState(car_state.state_rtd);
+    else if (car_state.mc_istates.vsmState == 4){
+    	MCInit_start();
+    }
 }
 
 /* ====== Shared functionality ====== */
