@@ -125,7 +125,7 @@ void clock_init();
 
 void MC_sendCommand();
 void MC_sendStop();
-int MC_faultedR() { return (MC_RESET_BITMASK & *(uint64_t*)&car_state.mc_faults); }
+int MC_faultedR() { return MC_RESET_BITMASK & car_state.mc_faults.postErrors || MC_RESET_BITMASK >> 32 & car_state.mc_faults.runtimeErrors;); }
 int MC_faulted()  { return car_state.mc_faults.postErrors || car_state.mc_faults.runtimeErrors; }
 
 void Shared_processCAN();
@@ -287,7 +287,7 @@ void Idle_input() {
 
     if (braking && GPIO_buttonReleased(INPUT_BUTTONID_RTD) && car_state.last_valid_tr < 10) {
         GPIO_buttonConsume(INPUT_BUTTONID_RTD);
-        if(MC_faulted()){
+        if(MC_faultedR()){
             RTOS_switchState(car_state.state_reset);
         } else{
             RTOS_switchState(car_state.state_mcinit);
@@ -315,12 +315,10 @@ void Reset_input() {
     int fltr = MC_faultedR();
     int flt = MC_faulted();
 
-//    if (!fltr && flt) {
-//        RTOS_switchState(car_state.state_idle);
-//        return;
-//    }
-
-    if (!flt) {
+   if (!fltr && flt) {
+       RTOS_switchState(car_state.state_idle);
+       return;
+   } else if (!flt) {
     	RTOS_switchState(car_state.state_mcinit);
         return;
     }
