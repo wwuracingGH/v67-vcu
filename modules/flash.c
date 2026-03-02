@@ -2,18 +2,18 @@
 #include "stm32h533xx.h"
 #include <stdint.h>
 
-volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
-        sizeof(CarParameters_t),
-        { 2369, 1452, 1710, 2634, 2991, 2059, 1079, 2014, 409, 3686, 35000 },
-		{ 1000, 100, 3000, 0},
-        {
-            10000000
-        }
+volatile CarParameters_t* stored_values = (CarParameters_t*)0x0900C000; 
+
+CarParameters_t default_vals = {
+	sizeof(CarParameters_t),
+	{ 1898, 3366, 2281, 845, 2130, 709, 1955, 3374, 409, 3686, 35000 },
+	{ 200, 100, 3000, 0},
+	{10000000}
 };
 
 volatile CarParameters_t ram_values = { 0 };
-
 int ram_initialized = 0;
+const int use_default = 1;
 
 /* 
  * Unlocks the flash to be able to write to it 
@@ -123,22 +123,14 @@ void FLASH_EraseHighCycle() {
 };
 
 volatile CarParameters_t* FLASH_getVals(){
-	const int use_default = 1;
 	uint16_t* rm_ptr = (uint16_t*)&ram_values;
 
-	CarParameters_t default_vals = {
-			sizeof(CarParameters_t),
-			{ 1898, 3314, 2199, 768, 1944, 3480, 2191, 655, 409, 3686, 35000 },
-			{ 200, 100, 3000, 0},
-	        {
-	            10000000
-	        }};
 
-	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)&stored_values;
+	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)stored_values;
 	const int writes = sizeof(CarParameters_t) / 2;
 	if (use_default){
 		FLASH_EraseHighCycle();
-		FLASH_WriteSector(&default_vals, 0, sizeof(ram_values));
+		FLASH_WriteSector(&default_vals, 0, sizeof(CarParameters_t));
 	}
 
 	if (!ram_initialized) {
@@ -246,6 +238,6 @@ void FLASH_storeVal(int id, int newVal, int write){
 	}
 
 	if (write) {
-		FLASH_WriteSector(&ram_values, 0, sizeof(ram_values));
+		FLASH_WriteSector(&ram_values, 0, sizeof(CarParameters_t));
 	}
 }

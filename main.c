@@ -125,8 +125,12 @@ void clock_init();
 
 void MC_sendCommand();
 void MC_sendStop();
-int MC_faultedR() { return MC_RESET_BITMASK & car_state.mc_faults.postErrors || MC_RESET_BITMASK >> 32 & car_state.mc_faults.runtimeErrors;); }
+
 int MC_faulted()  { return car_state.mc_faults.postErrors || car_state.mc_faults.runtimeErrors; }
+int MC_faultedR() { 
+    return MC_RESET_BITMASK & car_state.mc_faults.postErrors || 
+        (MC_RESET_BITMASK >> 32) & car_state.mc_faults.runtimeErrors; 
+}
 
 void Shared_processCAN();
 void Shared_control();
@@ -253,9 +257,6 @@ void MC_sendCommand() {
 
 void MC_watchdog() {
     if(!MC_WATCHDOG_ENABLED) return;
-    /* disabled because of change in state diagram*/
-    // if (MC_faultedR() && MC_RESET_LOOP)
-    //     RTOS_switchState(car_state.state_reset);
     if (MC_faulted()) {
         RTOS_switchState(car_state.state_idle);
     }
@@ -273,11 +274,6 @@ void Idle_input() {
 
     if (MC_faulted()) {
         GPIO_setLED(LED_COLOR_FAULT);
-            /* disabled because of change in state diagram*/
-        // if (MC_faultedR() && MC_RESET_LOOP) {
-        //     RTOS_switchState(car_state.state_reset);
-        //     return;
-        // }
     } else {
         GPIO_setLED(LED_COLOR_IDLE);
     }
@@ -315,10 +311,10 @@ void Reset_input() {
     int fltr = MC_faultedR();
     int flt = MC_faulted();
 
-   if (!fltr && flt) {
+    if (!fltr && flt) {
        RTOS_switchState(car_state.state_idle);
        return;
-   } else if (!flt) {
+    } else if (!flt) {
     	RTOS_switchState(car_state.state_mcinit);
         return;
     }
@@ -456,7 +452,6 @@ void Shared_control() {
     } else {
     	if (car_state.fault_counter < 100)
     		car_state.fault_counter += control_period;
-
         if (car_state.fault_counter < fault_ignore) {
             command_msg.torqueCommand = car_state.last_valid_tr;
         } else if (car_state.fault_counter < fault_cutoff) {         
