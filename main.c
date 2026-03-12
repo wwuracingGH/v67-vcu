@@ -49,7 +49,7 @@ const uint8_t   buttonNum     = 1;
 #define LED_COLOR_FAULT     0xFF00000F /* red */
 #define LED_COLOR_WAITING   0xFFFFFF0F /* white */
 #define LED_COLOR_SPECIAL   0x0000FF0F /* blue */
-#define LED_COLOR_RESET   	0xFFA0000F /* yellowish - orange */
+#define LED_COLOR_RESET   	0xFF50000F /* yellowish - orange */
 #define LED_COLOR_LEDOFF    0x00000000 /* black */
 
 /*
@@ -128,8 +128,12 @@ void MC_sendStop();
 
 int MC_faulted()  { return car_state.mc_faults.postErrors || car_state.mc_faults.runtimeErrors; }
 int MC_faultedR() { 
-    return MC_RESET_BITMASK & car_state.mc_faults.postErrors || 
-        (MC_RESET_BITMASK >> 32) & car_state.mc_faults.runtimeErrors; 
+    return( MC_RESET_BITMASK & car_state.mc_faults.postErrors ||
+        (MC_RESET_BITMASK >> 32) & car_state.mc_faults.runtimeErrors)
+
+    	&& !(~(MC_RESET_BITMASK) & car_state.mc_faults.postErrors ||
+        ~(MC_RESET_BITMASK >> 32) & car_state.mc_faults.runtimeErrors);
+		;
 }
 
 void Shared_processCAN();
@@ -158,13 +162,13 @@ void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data);
 void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t byte_size);
 void systick_handler() { RTOS_Update(); }
 
-const int control_period        =   200;
+const int control_period        =   1;
 const int mc_command_period     =     5;
 const int process_can_period    =     1;
 const int diagnostics_period    =   250;
 const int input_period          =    50;
 const int mc_watchdog_period    =   999;
-const int mc_reset_period       =  1499;
+const int mc_reset_period       =  499;
 
 CarParameters_t* car_params;
 ADC_Mult_t apps_mult = { 0 };
@@ -227,7 +231,7 @@ int main(void) {
 
     RTOS_start_armeabi(SYS_CLOCK);
     for (;;) {
-        RTOS_ExecuteTasks();
+    	RTOS_ExecuteTasks();
     }
 }
 

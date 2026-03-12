@@ -49,9 +49,11 @@ SECTIONS
 		_ebss = .;
 	} >SRAM
 
+	/*
     .config : 
     {
        . = ALIGN(4);
        KEEP(*(.config))
     } > USR_FLASH
+	*/
 }
