@@ -434,8 +434,8 @@ void Shared_control() {
     car_state.adc_dat = bl;
     LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
-    //int max_torque = car_params->params.max_torque;
-    int max_torque = 200;
+    int max_torque = car_params->params.max_torque;
+    //int max_torque = 200;
     ControlReq_t tr = CTRL_getCommand(&apps_mult, &car_params->params, max_torque);
 
     /* the silly */

@@ -2,20 +2,37 @@
 #include "stm32h533xx.h"
 #include <stdint.h>
 #include "logging.h"
+#include "../flashsettings.h"
 
 volatile CarParameters_t* stored_values = (CarParameters_t*)0x08070000;
 
-
 CarParameters_t default_vals = {
-	sizeof(CarParameters_t),
-	{2177, 1771, 1782, 2189, 2251, 2655, 1715, 1312, 309, 3686, 35000 },
-	{ 200, 100, 3000, 0},
-	{10000000}
+	sizeof(CarParameters_t), 
+	{
+		DEFAULT_APPS1_MIN, 
+		DEFAULT_APPS1_MAX, 
+		DEFAULT_APPS2_MIN, 
+		DEFAULT_APPS2_MAX,
+		DEFAULT_APPS3_MIN, 
+		DEFAULT_APPS3_MAX, 
+		DEFAULT_APPS4_MIN, 
+		DEFAULT_APPS4_MAX, 
+		DEFAULT_BPS_MIN, 
+		DEFAULT_BPS_MAX,
+		DEFAULT_BPS_RATIO
+	},
+	{ 
+		DEFAULT_MAX_TORQUE, 
+		DEFAULT_HARD_BRAKING, 
+		DEFAULT_MAX_BRAKING, 
+		0
+	},
+	{0}
 };
 
 volatile CarParameters_t ram_values = { sizeof(CarParameters_t), { 0 }, { 0 }, { 0 } };
 int ram_initialized = 0;
-const int use_default = 1;
+const int use_default = 0;
 
 /* 
  * Unlocks the flash to be able to write to it 
@@ -115,7 +132,6 @@ void FLASH_EraseMemory() {
 
 volatile CarParameters_t* FLASH_getVals(){
 	uint16_t* rm_ptr = (uint16_t*)&ram_values;
-
 
 	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)stored_values;
 	const int writes = sizeof(CarParameters_t) / 2;
