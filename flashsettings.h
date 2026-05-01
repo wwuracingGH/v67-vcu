@@ -6,8 +6,8 @@
 #define DEFAULT_APPS3_MAX    2697 
 #define DEFAULT_APPS4_MIN    1685
 #define DEFAULT_APPS4_MAX    1270
-#define DEFAULT_BPS_MIN       309 
-#define DEFAULT_BPS_MAX      3686 
+#define DEFAULT_BPS_MIN       372 
+#define DEFAULT_BPS_MAX      3348 
 #define DEFAULT_BPS_RATIO   35000
 	
 #define DEFAULT_MAX_TORQUE   1000 
