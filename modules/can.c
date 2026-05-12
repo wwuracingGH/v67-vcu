@@ -4,13 +4,24 @@
 #include "can.h"
 #include "stm32h5xx.h"
 
-#define CAN_BUFFER_LEN 128
-CAN_Message_t buffer[CAN_BUFFER_LEN];
+#define CAN_RX_BUFFER_LEN 256
+CAN_Message_t rx_buffer[CAN_RX_BUFFER_LEN];
 
 /* Index of last CAN message put */
-uint16_t put_head = 0;
+uint16_t rx_put_head = 0;
 /* Index of where the last message read is */
-uint16_t get_head = 0;
+uint16_t rx_get_head = 0;
+
+
+/* TODO: implement this perhaps */
+
+#define CAN_TX_BUFFER_LEN 32
+CAN_Message_t tx_buffer[CAN_TX_BUFFER_LEN];
+
+/* Index of last CAN message put */
+uint16_t tx_put_head = 0;
+/* Index of where the last message read is */
+uint16_t tx_get_head = 0;
 
 void CAN_init() {
     /* Enable FDCAN clock */
@@ -165,9 +176,9 @@ uint32_t* _get_data(FDCAN_Rx_FIFO_Element_Typedef* msg) {
 }
 
 void CAN_recieveMessage(uint32_t id, uint16_t bus, uint16_t len, uint32_t * data) {
-    buffer[put_head] = (CAN_Message_t){id, len, bus, {data[0], data[1]}};
-    put_head++;
-    if (put_head == CAN_BUFFER_LEN) put_head = 0;
+    rx_buffer[rx_put_head] = (CAN_Message_t){id, len, bus, {data[0], data[1]}};
+    rx_put_head++;
+    if (rx_put_head == CAN_RX_BUFFER_LEN) rx_put_head = 0;
 }
 
 void CAN_recieve1RX0() {
@@ -219,18 +230,18 @@ void fdcan2_it1_handler() {
 }
 
 int CAN_rxCount() {
-    int l = put_head - get_head;
-    if (l < 0) l += CAN_BUFFER_LEN;
+    int l = rx_put_head - rx_get_head;
+    if (l < 0) l += CAN_RX_BUFFER_LEN;
     return l;
 }
 
 CAN_Message_t* CAN_getFirstMsg() {
-	if(get_head == put_head) return 0;
-    uint32_t old = get_head;
-    get_head++;
-    if (get_head == CAN_BUFFER_LEN) get_head = 0;
+	if(rx_get_head == rx_put_head) return 0;
+    uint32_t old = rx_get_head;
+    rx_get_head++;
+    if (rx_get_head >= CAN_RX_BUFFER_LEN) rx_get_head = 0;
 
-    return buffer + old;
+    return rx_buffer + old;
 }
 
 int CAN_bytesFromDLC(int dlc) {

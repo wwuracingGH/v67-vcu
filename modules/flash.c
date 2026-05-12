@@ -1,19 +1,38 @@
 #include "flash.h"
 #include "stm32h533xx.h"
 #include <stdint.h>
+#include "logging.h"
+#include "../flashsettings.h"
 
-volatile CarParameters_t stored_values __attribute__((section(".config"))) = {
-        sizeof(CarParameters_t),
-        { 2369, 1452, 1710, 2634, 2991, 2059, 1079, 2014, 409, 3686, 35000 },
-		{ 1000, 100, 3000, 0},
-        {
-            10000000
-        }
+volatile CarParameters_t* stored_values = (CarParameters_t*)0x08070000;
+
+CarParameters_t default_vals = {
+	sizeof(CarParameters_t), 
+	{
+		DEFAULT_APPS1_MIN, 
+		DEFAULT_APPS1_MAX, 
+		DEFAULT_APPS2_MIN, 
+		DEFAULT_APPS2_MAX,
+		DEFAULT_APPS3_MIN, 
+		DEFAULT_APPS3_MAX, 
+		DEFAULT_APPS4_MIN, 
+		DEFAULT_APPS4_MAX, 
+		DEFAULT_BPS_MIN, 
+		DEFAULT_BPS_MAX,
+		DEFAULT_BPS_RATIO
+	},
+	{ 
+		DEFAULT_MAX_TORQUE, 
+		DEFAULT_HARD_BRAKING, 
+		DEFAULT_MAX_BRAKING, 
+		0
+	},
+	{0}
 };
 
-volatile CarParameters_t ram_values = { 0 };
-
+volatile CarParameters_t ram_values = { sizeof(CarParameters_t), { 0 }, { 0 }, { 0 } };
 int ram_initialized = 0;
+const int use_default = 0;
 
 /* 
  * Unlocks the flash to be able to write to it 
@@ -27,7 +46,7 @@ void FLASH_Init() {
  * Takes in a location in device sram, a page # in high cycle flash, and writes one to the other
  * First clearing the memory with page erase, and then writing the new data from src.
  */
-void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
+void FLASH_WriteSector(void* src, uint32_t* start, uint32_t len) {
 	while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
 
 	if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
@@ -40,15 +59,23 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 
 	FLASH->NSCR |= FLASH_CR_SER; /* Tell flash we're doing a sector erase */
 
-	FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
+	uint32_t sector_start = ((uint32_t)start) - 0x08040000;
+	sector_start /= 0x2000;
+	uint32_t sector_end = ((uint32_t)start + (len / 4)) - 0x08040000;
+	sector_end /= 0x2000;
 
-	uint32_t sector = 31 - page_start;
+	for (uint32_t sector = sector_start; sector <= sector_end; sector++){
+		FLASH->NSCR |= FLASH_CR_BKSEL; /* Select bank 2 */
+		FLASH->NSCR |= FLASH_CR_SER; /* Tell flash we're doing a sector erase */
+		FLASH->NSCR &= ~FLASH_CR_SNB_Msk; /* Clear sector selection bits */
 
-	FLASH->NSCR |= ((sector << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
+		FLASH->NSCR |= ((sector << FLASH_CR_SNB_Pos) & FLASH_CR_SNB_Msk); /* tell flash which sector to erase */
 
-	FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
+		FLASH->NSCR |= FLASH_CR_START; /* Start the erase */
+		while(FLASH->NSSR & FLASH_SR_BSY); /* wait for the erase to finish */
 
-	while(FLASH->NSSR & FLASH_SR_BSY){}; /* wait for the erase to finish */
+		FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
+	}
  
 	FLASH->NSCR &= ~FLASH_CR_SER_Msk; /* Tell the flash we're no longer doing a sector erase */
 
@@ -58,10 +85,8 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 		FLASH->NSCR |= FLASH_CR_PG;
 	}
 
-	uint32_t* page_mem_addr = ((uint32_t*)0x0900C000) + (page_start * 0x1800U); /*Bank 2 base + page_num * Page size */
-
 	for (uint32_t i = 0; i < len / 4; i++) {
-		page_mem_addr[i] = ((uint32_t*)src)[i];
+		start[i] = ((uint32_t*)src)[i];
 	}
 
 	while(FLASH->NSSR & FLASH_SR_BSY){}; /* wait for the write to finish */
@@ -71,7 +96,7 @@ void FLASH_WriteSector(void* src, uint32_t page_start, uint32_t len) {
 	FLASH->NSCR |= FLASH_CR_LOCK; /* Lock the flash while we're not using it */
 };
 
-void FLASH_EraseHighCycle() {
+void FLASH_EraseMemory() {
     while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
 
     if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
@@ -101,44 +126,17 @@ void FLASH_EraseHighCycle() {
     while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)); /* Wait for flash to be avaliable */
 
     FLASH->NSSR &= 0xFF << FLASH_SR_EOP_Pos; /* Clear error bits */
-
-    if (FLASH->NSCR & FLASH_CR_LOCK) { /* Unlock the flash if it's locked */
-    	FLASH_Init();
-    }
     
-    if (!(FLASH->NSCR & FLASH_CR_PG)) { /* Tell the flash we're gonna program if we haven't yet */
-	    FLASH->NSCR |= FLASH_CR_PG;
-    }
-
-    uint32_t* flash_start = (uint32_t*)0x0900C000;
-    volatile uint32_t total_words = 0xC000 / 4; /* 0x3000 */
-    for(uint32_t i = 0; i < total_words; i++) {
-    	flash_start[i] = 0xFFFFFFFF;
-    	while((FLASH->NSSR & FLASH_SR_BSY) || (FLASH->NSSR & FLASH_SR_DBNE)){}; /* Wait for flash to be avaliable */
-    }	
-
-    FLASH->NSCR &= ~FLASH_CR_PG_Msk; /* clear programming bit */
-
     FLASH->NSCR |= FLASH_CR_LOCK; /* Lock the flash while we're not using it */
 };
 
 volatile CarParameters_t* FLASH_getVals(){
-	const int use_default = 1;
 	uint16_t* rm_ptr = (uint16_t*)&ram_values;
 
-	CarParameters_t default_vals = {
-			sizeof(CarParameters_t),
-			{ 1898, 3314, 2199, 768, 1944, 3480, 2191, 655, 409, 3686, 35000 },
-			{ 200, 100, 3000, 0},
-	        {
-	            10000000
-	        }};
-
-	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)&stored_values;
+	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)stored_values;
 	const int writes = sizeof(CarParameters_t) / 2;
 	if (use_default){
-		FLASH_EraseHighCycle();
-		FLASH_WriteSector(&default_vals, 0, sizeof(ram_values));
+		FLASH_WriteSector(&default_vals, stored_values, sizeof(CarParameters_t));
 	}
 
 	if (!ram_initialized) {
@@ -246,6 +244,6 @@ void FLASH_storeVal(int id, int newVal, int write){
 	}
 
 	if (write) {
-		FLASH_WriteSector(&ram_values, 0, sizeof(ram_values));
+		FLASH_WriteSector(&ram_values, stored_values, sizeof(CarParameters_t));
 	}
 }
