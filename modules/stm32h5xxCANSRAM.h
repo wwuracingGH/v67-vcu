@@ -2,7 +2,7 @@
 #define __STM32_H5_CANSRAM__
 #include <stdint.h>
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint32_t H0;
     uint32_t H1;
     uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */
@@ -13,7 +13,7 @@ typedef struct {
     uint32_t E1;
 } FDCAN_Tx_FIFO_Event_Typedef;
 
-typedef struct __attribute__((packed)) {
+typedef struct {
     uint32_t H0;
     uint32_t H1;
     uint32_t data[16]; /* only the first two words of these are set in CAN 2.0 mode */

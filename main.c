@@ -24,6 +24,7 @@
 #include "modules/logging.h"
 #include "modules/flash.h"
 #include "modules/control.h"
+#include "modules/dynamics.h"
 #include "modules/can.h"
 #include "vendor/printf/printf.h"
 #include "canDefinitions.h"
@@ -366,7 +367,6 @@ void Shared_processCAN() {
     CAN_Message_t * msg;
     uint32_t tick = RTOS_getMainTick();
     while((msg = CAN_getFirstMsg()) != 0) {
-        uint32_t l = msg->dlc;
         if (msg->bus_id == 0) 
             car_state.last_can_timestamp1 = tick; 
         if (msg->bus_id == 1)
@@ -429,10 +429,6 @@ void Shared_control() {
     const int fault_ignore     = 20;
     const int fault_cutoff     = 80;
     const int fault_multiplier = 65536 / (fault_cutoff - fault_ignore);
-
-    ADC_Block_t bl = CTRL_condense();
-    car_state.adc_dat = bl;
-    LOG("%d %d %d %d %d %d\n", bl.APPS1, bl.APPS2, bl.APPS3, bl.APPS4, bl.FBPS, bl.RBPS);
 
     int max_torque = car_params->params.max_torque;
     //int max_torque = 200;

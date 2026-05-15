@@ -25,12 +25,13 @@ CarParameters_t default_vals = {
 		DEFAULT_MAX_TORQUE, 
 		DEFAULT_HARD_BRAKING, 
 		DEFAULT_MAX_BRAKING, 
-		0
+		0,
+		DEFAULT_TORQUE_CURVE
 	},
 	{0}
 };
 
-volatile CarParameters_t ram_values = { sizeof(CarParameters_t), { 0 }, { 0 }, { 0 } };
+CarParameters_t ram_values = { sizeof(CarParameters_t), { 0 }, { 0 }, { 0 } };
 int ram_initialized = 0;
 const int use_default = 0;
 
@@ -130,13 +131,13 @@ void FLASH_EraseMemory() {
     FLASH->NSCR |= FLASH_CR_LOCK; /* Lock the flash while we're not using it */
 };
 
-volatile CarParameters_t* FLASH_getVals(){
+CarParameters_t* FLASH_getVals(){
 	uint16_t* rm_ptr = (uint16_t*)&ram_values;
 
 	uint16_t* sv_ptr = use_default ? (uint16_t*)&default_vals : (uint16_t*)stored_values;
 	const int writes = sizeof(CarParameters_t) / 2;
 	if (use_default){
-		FLASH_WriteSector(&default_vals, stored_values, sizeof(CarParameters_t));
+		FLASH_WriteSector(&default_vals, (uint32_t*)stored_values, sizeof(CarParameters_t));
 	}
 
 	if (!ram_initialized) {
@@ -152,47 +153,45 @@ int FLASH_getVal(int id){
 	switch(id) {
 		case FLASH_PARAMID_APPS1_L: 
 			return (int)ram_values.adc_bounds.APPS1_l;
-			break;
 		case FLASH_PARAMID_APPS1_H: 
 			return (int)ram_values.adc_bounds.APPS1_h;
-			break;
 		case FLASH_PARAMID_APPS2_L: 
 			return (int)ram_values.adc_bounds.APPS2_l;
-			break;
 		case FLASH_PARAMID_APPS2_H: 
 			return (int)ram_values.adc_bounds.APPS2_h;
-			break;
 		case FLASH_PARAMID_APPS3_L: 
 			return (int)ram_values.adc_bounds.APPS3_l;
-			break;
 		case FLASH_PARAMID_APPS3_H: 
 			return (int)ram_values.adc_bounds.APPS3_h;
-			break;
 		case FLASH_PARAMID_APPS4_L: 
 			return (int)ram_values.adc_bounds.APPS4_l;
-			break;
 		case FLASH_PARAMID_APPS4_H: 
 			return (int)ram_values.adc_bounds.APPS4_h;
-			break;
 		case FLASH_PARAMID_BPS_S_MIN: 
 			return (int)ram_values.adc_bounds.BPS_s_min;
-			break;
 		case FLASH_PARAMID_BPS_S_MAX: 
 			return (int)ram_values.adc_bounds.BPS_s_max;
-			break;
 		case FLASH_PARAMID_BPS_F_BIAS:
 			return (int)ram_values.adc_bounds.BPS_f_bias; 
-			break;
 		case FLASH_PARAMID_MAX_TORQUE: 
 			return (int)ram_values.params.max_torque;
-			break;
 		case FLASH_PARAMID_HARD_BRAKING: 
 			return (int)ram_values.params.hard_braking;
-			break;
 		case FLASH_PARAMID_MAX_BRAKE_P: 
 			return (int)ram_values.params.max_braking_pres;
-			break;
 	}
+
+	{
+		int tcurve = id - FLASH_PARAMID_T_CURVE_STRT;
+		if (tcurve >= 0 && tcurve < FLASH_PARAMID_T_CURVE_LEN) {
+			int i = tcurve * 4;
+			return (uint32_t)ram_values.params.torque_curve[i + 0] << 0 |
+				   (uint32_t)ram_values.params.torque_curve[i + 1] << 8 |
+				   (uint32_t)ram_values.params.torque_curve[i + 2] << 16 |
+				   (uint32_t)ram_values.params.torque_curve[i + 3] << 24;
+		}
+	}
+
 	return -1;
 }
 
@@ -243,7 +242,18 @@ void FLASH_storeVal(int id, int newVal, int write){
 		default: break;
 	}
 
+	{
+		int tcurve = id - FLASH_PARAMID_T_CURVE_STRT;
+		if (tcurve >= 0 && tcurve < FLASH_PARAMID_T_CURVE_LEN) {
+			int i = tcurve * 4;
+			ram_values.params.torque_curve[i + 0] = (newVal << 0 ) & 0xFF;
+			ram_values.params.torque_curve[i + 1] = (newVal << 8 ) & 0xFF;
+			ram_values.params.torque_curve[i + 2] = (newVal << 16) & 0xFF;
+			ram_values.params.torque_curve[i + 3] = (newVal << 24) & 0xFF;
+		}
+	}
+
 	if (write) {
-		FLASH_WriteSector(&ram_values, stored_values, sizeof(CarParameters_t));
+		FLASH_WriteSector(&ram_values, (uint32_t*)stored_values, sizeof(CarParameters_t));
 	}
 }

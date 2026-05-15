@@ -249,5 +249,7 @@ int CAN_bytesFromDLC(int dlc) {
     return bytes[dlc]; 
 }
 int CAN_DLCFromBytes(int bytes) {
-    /* TODO */
+    if (bytes <= 8) return bytes;
+    if (bytes <= 24) return (bytes + 27) >> 2;
+    return (bytes + 191) >> 4;
 }

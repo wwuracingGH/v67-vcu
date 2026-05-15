@@ -346,7 +346,7 @@ extern void* memset(void* dest, int c, unsigned int len) {
 
 extern void * memcpy(void *dest, const void *src, unsigned int len) {
     uint8_t * p = dest;
-    uint8_t * s = src;
+    const uint8_t * s = src;
 
     while (len > 0) {
         *p = *s;

@@ -16,8 +16,6 @@
  * Calculated with fixed point multiplication for maximum speed, <3us. also checks
  * for apps sensor faults
  * 
- * ======= Vehicle Dynamics Modeling ======== 
- * Coming soon, maybe
  */
 
 #ifndef _MODULES_CONTROL_H_
@@ -42,6 +40,9 @@
 #define ROLLING_ADC_FRAMES (1 << ROLLING_ADC_FR_POW)
 #define ADC_CHANNELS       6
 #define ROLLING_ADC_VALS   (ROLLING_ADC_FRAMES * ADC_CHANNELS)
+
+#define TORQUE_CURVE_BITS 4
+#define TORQUE_CURVE_LEN (1 << TORQUE_CURVE_BITS)
 
 typedef struct {
     uint16_t APPS1;
@@ -86,6 +87,7 @@ typedef struct {
     uint16_t hard_braking;      /* total system pressure for hard braking */
     uint16_t max_braking_pres;  /* maximum braking pressure - 10x bar */
     uint16_t _reserved2;
+    uint8_t torque_curve[TORQUE_CURVE_LEN];
 } ControlParams_t;
 
 typedef struct {
@@ -94,16 +96,6 @@ typedef struct {
     uint16_t brake_pressure;    /* decimal pressure - 10x bar */
     uint16_t steer_angle;       /* possibly unused  - 10x deg */
 } ControlReq_t;
-
-/* TODO */
-typedef struct {
-    uint32_t dynamicState;
-} VehicleDynamicState_t;
-
-/* TODO */
-typedef struct {
-    uint32_t dynamicParams;
-} VehicleDynamicParams_t;
 
 void CTRL_ADCinit();
 

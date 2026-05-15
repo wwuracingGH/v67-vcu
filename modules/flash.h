@@ -1,6 +1,7 @@
 #ifndef _MODULES_FLASH_H_
 #define _MODULES_FLASH_H_
 #include "control.h"
+#include "dynamics.h"
 
 typedef struct {
     uint32_t stored_len;
@@ -24,6 +25,9 @@ typedef struct {
 #define FLASH_PARAMID_HARD_BRAKING  0xD
 #define FLASH_PARAMID_MAX_BRAKE_P   0xE
 
+#define FLASH_PARAMID_T_CURVE_STRT 	0x10
+#define FLASH_PARAMID_T_CURVE_LEN   4
+
 /* 
  * Unlocks the flash to be able to write to it 
  */
@@ -43,7 +47,7 @@ void FLASH_EraseMemory();
 /*
  * Returns a reference to the values stored in SRAM
  */
-volatile CarParameters_t* FLASH_getVals();
+CarParameters_t* FLASH_getVals();
 int FLASH_getVal();
 
 /*

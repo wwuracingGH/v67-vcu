@@ -9,6 +9,11 @@ void waitus(volatile uint32_t us) {
     for (volatile int i = us * 10; i > 0; i--);
 }
 
+int abs (int a) {
+    if (a < 0) return -a;
+    return a;
+}
+
 /* copy of the DAR */
 uint32_t gpdma_linked_list = (uint32_t)(&raw_vals);
 uint32_t gpdma_ll_loc = (uint32_t)(&gpdma_linked_list);
@@ -94,7 +99,7 @@ ADC_Block_t CTRL_condense() {
     uint32_t apps12 = 0, apps34 = 0, afrbps = 0;
     uint32_t* raw2_vals = (uint32_t*)&raw_vals[0];
     /* good luck with this loop lol */
-    for (; raw2_vals < (raw_vals + ROLLING_ADC_VALS); raw2_vals += 3) {
+    for (; raw2_vals < (uint32_t*)(raw_vals + ROLLING_ADC_VALS); raw2_vals += 3) {
         apps12 = __UADD16(apps12, raw2_vals[0]);
         apps34 = __UADD16(apps34, raw2_vals[1]);
         afrbps = __UADD16(afrbps, raw2_vals[2]);
@@ -148,6 +153,21 @@ void sort_dat_4(int32_t * vals) {
         vals[1] = vals[2];
         vals[2] = tmp;
     }
+}
+
+/* returns pedal position given the curve */
+uint16_t apply_curve(uint16_t pedal_pos, uint8_t* lut) {
+    const int OFFSET_BITS = (sizeof(pedal_pos) * 8) - TORQUE_CURVE_BITS;
+    
+    uint16_t low_bin = pedal_pos >> OFFSET_BITS;
+    uint16_t offset = pedal_pos & ((uint16_t)-1 >> TORQUE_CURVE_BITS);
+    
+    int low = lut[low_bin] << 8;
+    int high = (low_bin != TORQUE_CURVE_LEN - 1) ? lut[low_bin + 1] << 8 : 65536;
+    
+    int out = (((high - low) * offset) >> OFFSET_BITS) + low;
+    
+    return (uint16_t)out;
 }
 
 ADC_Mult_t CTRL_getADCMultiplers(volatile ADC_Bounds_t* bounds) {
@@ -221,7 +241,6 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
         }
     }
 
-
     if(maxdex - mindex == 3) {
         if (apps[2] - apps[1] > APPS_MAX_DELTA) {
             if (abs(apps[0] - apps[1]) < APPS_MAX_DELTA && abs(apps[2] - apps[3]) < APPS_MAX_DELTA)
@@ -249,14 +268,17 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
     }
 
     if (avg < 0) avg = 0;
-    if (avg > 65536) avg = 65536;
+    if (avg > 65535) avg = 65535;
+
 
     control_request.brake_pressure = ((uint32_t)braking_pressure * params->max_braking_pres) >> 16;
     if (avg > APPS_BPS_PLAUS && control_request.brake_pressure > params->hard_braking) {
         control_request.flags |= APPS_FAULT_PLAUS;
     }
 
-    control_request.torque = (avg * params->max_torque) >> 16;
+    uint16_t torquefraction = apply_curve(avg, params->torque_curve);
+    
+    control_request.torque = (torquefraction * params->max_torque) >> 16;
     if (control_request.torque > bound) {
         control_request.torque = bound;
     }

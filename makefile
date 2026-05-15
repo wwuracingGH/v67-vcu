@@ -1,5 +1,5 @@
 CC=arm-none-eabi-gcc
-CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Wall -Wextra -ffunction-sections -g
+CFLAGS=-mcpu=cortex-m33 -mfpu=auto -mfloat-abi=hard -mthumb -nostdlib -W -Werror -Wall -Wextra -ffunction-sections -g
 CPPFLAGS= -DSTM32H533xx -Ivendor/CMSIS/Device/ST/STM32H5/Include \
 	 -Ivendor/CMSIS/Core/Include -Ivendor
 
