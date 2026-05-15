@@ -61,7 +61,7 @@ const uint8_t   buttonNum     = 1;
 #define MC_ON_BABYSITTING           1 /* enables waiting for motor controller to get enabled */
 #define MC_RESET_LOOP               1 /* enables reset loop */
 #define CAN_WATCHDOG                0 /* resets can peripheral if no messages after 2 seconds - bad idea on test harness */
-#define IGNORE_BRAKES               1 /* ignores brakes when checking for rtd and plaus */
+#define IGNORE_BRAKES               0 /* ignores brakes when checking for rtd and plaus */
 
 /*
  * EXTRA BEHAVIOR CONFIG
