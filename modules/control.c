@@ -186,14 +186,17 @@ ControlReq_t CTRL_getCommand(ADC_Mult_t* mult, ControlParams_t* params, uint16_t
     int bps_data_err = (vals.FBPS < (mult->BPS_s_min >> 1)) << 1 | (vals.RBPS < (mult->BPS_s_min >> 1));
     switch (bps_data_err) {
     case 2:
-        braking_pressure = (vals.RBPS - mult->BPS_s_min) * mult->BPS_r_mult; break;
+        braking_pressure = ((int32_t)vals.RBPS - mult->BPS_s_min) * mult->BPS_r_mult; break;
     case 1:
-        braking_pressure = (vals.FBPS - mult->BPS_s_min) * mult->BPS_f_mult; break;
+        braking_pressure = ((int32_t)vals.FBPS - mult->BPS_s_min) * mult->BPS_f_mult; break;
     case 0:
-        braking_pressure = ((vals.RBPS + vals.FBPS) - (2 * mult->BPS_s_min)) * mult->BPS_b_mult; break;
+        braking_pressure = ((int32_t)(vals.RBPS + vals.FBPS) - (2 * mult->BPS_s_min)) * mult->BPS_b_mult; break;
     default:
         control_request.flags |= APPS_FAULT_BSE; break;
     }
+
+    if (braking_pressure < 0)
+        braking_pressure = 0;
 
     int32_t apps[4];
     apps[0] = ((int32_t)vals.APPS1 - (int32_t)mult->APPS1_strt) * mult->APPS1_mult;

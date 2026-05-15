@@ -2,3 +2,4 @@
 a.elf
 *.o
 vendor/CMSIS/
+.settings/
