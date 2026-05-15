@@ -165,10 +165,10 @@ void systick_handler() { RTOS_Update(); }
 const int control_period        =   1;
 const int mc_command_period     =     5;
 const int process_can_period    =     1;
-const int diagnostics_period    =   250;
+const int diagnostics_period    =    10;
 const int input_period          =    50;
-const int mc_watchdog_period    =   999;
-const int mc_reset_period       =  499;
+const int mc_watchdog_period    =   100;
+const int mc_reset_period       =    50;
 
 CarParameters_t* car_params;
 ADC_Mult_t apps_mult = { 0 };
