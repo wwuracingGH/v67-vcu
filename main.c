@@ -256,7 +256,7 @@ void RTD_input() {
 }
 
 void MC_sendCommand() {
-    CAN_sendmessage(CTRL_CAN, MC_CANID_COMMAND, 8, (uint8_t*)&command_msg, 0);
+    CAN_sendmessage(CTRL_CAN, MC_CANID_COMMAND, 8, (uint8_t*)&command_msg, 1);
 }
 
 void MC_watchdog() {
