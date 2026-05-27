@@ -162,7 +162,7 @@ void msgCallback(uint8_t bus, uint32_t id, uint8_t dlc, uint32_t* data);
 void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t byte_size);
 void systick_handler() { RTOS_Update(); }
 
-const int control_period        =   1;
+const int control_period        =     1;
 const int mc_command_period     =     5;
 const int process_can_period    =     1;
 const int diagnostics_period    =    10;
@@ -256,7 +256,7 @@ void RTD_input() {
 }
 
 void MC_sendCommand() {
-    CAN_sendmessage(CTRL_CAN, MC_CANID_COMMAND, 8, (uint8_t*)&command_msg);
+    CAN_sendmessage(CTRL_CAN, MC_CANID_COMMAND, 8, (uint8_t*)&command_msg, 0);
 }
 
 void MC_watchdog() {
@@ -297,7 +297,7 @@ void Idle_input() {
 
 /* ======= Reset Specific Functionality ======== */
 void Reset_MC(){
-    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg);
+    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg, 0);
 }
 
 void Reset_start() {
@@ -354,12 +354,12 @@ void MCInit_loop() {
 
 /* ====== Shared functionality ====== */
 void Shared_diagnostics() {
-    CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_RAW, 8, (uint8_t*)&car_state.adc_dat);
-    CAN_sendmessage(DATA_CAN, VCU_CANID_BPS_RAW, 4, (uint8_t*)&car_state.adc_dat.FBPS);
-    CAN_sendmessage(DATA_CAN, VCU_CANID_CTRL_VEC, 8, (uint8_t*)&car_state.last_ctrl_vec);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_APPS_RAW, 8, (uint8_t*)&car_state.adc_dat, 0);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_BPS_RAW, 4, (uint8_t*)&car_state.adc_dat.FBPS, 0);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_CTRL_VEC, 8, (uint8_t*)&car_state.last_ctrl_vec, 0);
     VCU_VCUState st = { rtos_scheduler.state, car_state.fault_counter, car_state.plausibility_latch, car_state.last_valid_tr };
 
-    CAN_sendmessage(DATA_CAN, VCU_CANID_VCU_STATE, 4, (uint8_t*)&st);
+    CAN_sendmessage(DATA_CAN, VCU_CANID_VCU_STATE, 4, (uint8_t*)&st, 1);
 }
 
 void Shared_processCAN() {
