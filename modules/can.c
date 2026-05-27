@@ -127,7 +127,7 @@ void CAN_reset() {
 }
 
 void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, uint8_t* data, uint32_t blocking) {
-    /* Just force a message if buffer is full */
+    /* if non-blocking, exit if full, else, block or reset */
     if (!blocking && (FDCAN->TXFQS & FDCAN_TXFQS_TFQF_Msk)) {
         return;
     }
