@@ -297,7 +297,7 @@ void Idle_input() {
 
 /* ======= Reset Specific Functionality ======== */
 void Reset_MC(){
-    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg, 0);
+    CAN_sendmessage(CTRL_CAN, MC_CANID_PARAMCOM, 8, (uint8_t*)&reset_msg, 1);
 }
 
 void Reset_start() {
