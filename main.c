@@ -406,7 +406,7 @@ void Shared_processCAN() {
         case VCU_CANID_PARAM_REQUEST:
         	VCU_ParamReq* rq = (VCU_ParamReq*)msg->data;
         	VCU_ParamReveal rv = { FLASH_getVal(rq->id), rq->id };
-        	CAN_sendmessage(msg->bus_id ? DATA_CAN : CTRL_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv);
+        	CAN_sendmessage(msg->bus_id ? DATA_CAN : CTRL_CAN, VCU_CANID_PARAM_REVEAL, 6, (uint8_t*)&rv, 1);
             break;
         default:
             break;
@@ -444,7 +444,7 @@ void Shared_control() {
     if ((tr.flags & APPS_FAULT_PLAUS)) {
         car_state.plausibility_latch = 1;
     } else if (car_state.plausibility_latch) {
-        if (tr.torque < (car_params->params.max_torque / 10)) {
+        if (tr.torque < (car_params->params.max_torque / 20)) {
             car_state.plausibility_latch = 0;
         }
     }

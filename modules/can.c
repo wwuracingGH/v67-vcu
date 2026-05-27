@@ -132,7 +132,7 @@ void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, ui
         return;
     }
 
-    int timeout = 30000;
+    int timeout = 20000;
     while ((FDCAN->TXFQS & FDCAN_TXFQS_TFQF_Msk) && timeout) timeout--;    
 
     if (!timeout) {
