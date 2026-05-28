@@ -28,7 +28,7 @@ typedef struct {
 
 void memcpy_32(uint32_t* dest, uint32_t* src, uint32_t l);
 
-void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, uint8_t* data);
+void CAN_sendmessage(FDCAN_GlobalTypeDef* FDCAN, uint16_t id, uint8_t length, uint8_t* data, uint32_t blocking);
 int CAN_rxCount();
 CAN_Message_t* CAN_getFirstMsg();
 
